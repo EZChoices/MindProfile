@@ -24,7 +24,7 @@ Environment
 - `OPENAI_API_KEY` (optional) — enables LLM profiling + vision OCR.
 - `OPENAI_MODEL` (optional) — defaults to `gpt-4o-mini`.
 - `OPENAI_VISION_MODEL` (optional) — defaults to `gpt-4o-mini`.
-- `MINDPROFILE_DATA_FILE` (optional) — defaults to `.data/profiles.json`.
+- `MINDPROFILE_DATA_FILE` (optional) — defaults to `/tmp/mindprofile/profiles.json` for serverless-friendly writes.
 - `MINDPROFILE_RETENTION_HOURS` (optional) — defaults to `24`.
 
 API quick reference
@@ -37,6 +37,6 @@ API quick reference
 
 Notes
 -----
-- Text is anonymized before storage. Profiles persist to a JSON file with a retention window.
+- Text is anonymized before storage. Profiles persist to a JSON file with a retention window (default path is `/tmp/mindprofile/profiles.json`, which is compatible with read-only deploys like Vercel).
 - OCR uses OpenAI vision if available; otherwise falls back to a stub.
 - Profiling uses OpenAI if available; otherwise falls back to heuristic scoring.
