@@ -26,8 +26,7 @@ const pickCommunicationStyle = (text: string) => {
   const thanksCount = (text.match(/\bthanks|thank you\b/gi) || []).length;
 
   if (questions > 6) return "Highly inquisitive, probes for nuance and alternatives.";
-  if (pleaseCount + thanksCount > 2)
-    return "Polite, collaborative tone with clear asks.";
+  if (pleaseCount + thanksCount > 2) return "Polite, collaborative tone with clear asks.";
   if (text.length > 1500)
     return "Long-form, provides context up front and expects structured replies.";
   return "Direct and succinct; prefers quick iterations over long briefs.";
@@ -99,8 +98,7 @@ const buildUsagePatterns = (signals: Set<string>, text: string) => {
 
   if (snippets > 0 || signals.has("builder"))
     patterns.add("Leans on AI as a coding co-pilot for drafts and fixes.");
-  if (signals.has("writer"))
-    patterns.add("Uses AI to reshape tone, intros, and outlines.");
+  if (signals.has("writer")) patterns.add("Uses AI to reshape tone, intros, and outlines.");
   if (signals.has("analyst"))
     patterns.add("Checks reasoning and requests structured breakdowns.");
   if (patterns.size < 2) {
@@ -169,7 +167,7 @@ const buildFallbackProfile = (
 const buildPrompt = (sanitized: string, ingestionType: IngestionType) => `
 You are MindProfile, a behavioral analyst for AI conversations.
 Input: An anonymized transcript between a human and an AI.
-Goal: Describe the human’s thinking and communication style, strengths, blind spots, usage patterns, and 3–5 recommended workflows.
+Goal: Describe the human's thinking and communication style, strengths, blind spots, usage patterns, and 3-5 recommended workflows.
 Return JSON with keys: headline, thinkingStyle, communicationStyle, strengths (array), blindSpots (array), usagePatterns (array), recommendations (array), confidence (0-1).
 Context level: ${ingestionType}.
 Transcript:
@@ -187,21 +185,21 @@ export const generateProfileSummary = async (
   }
 
   try {
-    const response = await client.responses.create({
+    const response = await client.chat.completions.create({
       model: config.openAiModel,
-      input: [
+      messages: [
         {
           role: "user",
           content: buildPrompt(sanitized, ingestionType),
         },
       ],
-      response_format: { type: "json_object" },
-      max_output_tokens: 700,
+      max_tokens: 700,
       temperature: 0.5,
     });
 
-    const text = response.output[0].content[0].text;
-    const parsed = JSON.parse(text) as ProfileSummary;
+    const text = response.choices[0]?.message?.content?.trim();
+    const parsed = text ? (JSON.parse(text) as Partial<ProfileSummary>) : {};
+    const fallback = buildFallbackProfile(sanitized, ingestionType);
 
     const summary: ProfileSummary = {
       headline:
@@ -209,21 +207,14 @@ export const generateProfileSummary = async (
         (ingestionType === "link"
           ? "Single-session snapshot based on the shared conversation."
           : "Behavioral snapshot generated from the provided sample."),
-      thinkingStyle: parsed.thinkingStyle || buildFallbackProfile(sanitized, ingestionType).thinkingStyle,
-      communicationStyle:
-        parsed.communicationStyle ||
-        buildFallbackProfile(sanitized, ingestionType).communicationStyle,
-      strengths: parsed.strengths?.length ? parsed.strengths : buildFallbackProfile(sanitized, ingestionType).strengths,
-      blindSpots: parsed.blindSpots?.length ? parsed.blindSpots : buildFallbackProfile(sanitized, ingestionType).blindSpots,
-      usagePatterns:
-        parsed.usagePatterns?.length
-          ? parsed.usagePatterns
-          : buildFallbackProfile(sanitized, ingestionType).usagePatterns,
+      thinkingStyle: parsed.thinkingStyle || fallback.thinkingStyle,
+      communicationStyle: parsed.communicationStyle || fallback.communicationStyle,
+      strengths: parsed.strengths?.length ? parsed.strengths : fallback.strengths,
+      blindSpots: parsed.blindSpots?.length ? parsed.blindSpots : fallback.blindSpots,
+      usagePatterns: parsed.usagePatterns?.length ? parsed.usagePatterns : fallback.usagePatterns,
       recommendations:
-        parsed.recommendations?.length
-          ? parsed.recommendations
-          : buildFallbackProfile(sanitized, ingestionType).recommendations,
-      confidence: Number(parsed.confidence || 0.82),
+        parsed.recommendations?.length ? parsed.recommendations : fallback.recommendations,
+      confidence: Number(parsed.confidence || fallback.confidence || 0.82),
     };
 
     return { sanitizedText: sanitized, summary };
