@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { load } from "cheerio";
 import OpenAI from "openai";
 import type { Profile } from "@/types/profile";
 
@@ -6,11 +7,21 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const allowedHosts = [
+  "chatgpt.com",
+  "chat.openai.com",
+  "claude.ai",
+  "gemini.google.com",
+  "g.co",
+  "ai.google.com",
+];
+
 const anonymizeText = (text: string): string => {
   let sanitized = text.replace(/\b\S+@\S+\.\S+\b/g, "[EMAIL]");
   sanitized = sanitized.replace(/https?:\/\/\S+/g, "[URL]");
   sanitized = sanitized.replace(/\d{7,}/g, "[PHONE]");
   sanitized = sanitized.replace(/\n{3,}/g, "\n\n");
+  sanitized = sanitized.replace(/\s{2,}/g, " ");
   return sanitized.trim();
 };
 
@@ -21,34 +32,28 @@ const normalizeConfidence = (value: string | undefined): Profile["confidence"] =
   return "medium";
 };
 
-export async function POST(request: Request) {
-  try {
-    const body = await request.json();
-    const mode = body?.mode as string | undefined;
-    const rawText = typeof body?.text === "string" ? body.text : "";
-    const text = rawText.trim();
+const extractTextFromHtml = (html: string): string => {
+  const $ = load(html);
+  $("script, style").remove();
+  const mainText = $("main").text();
+  const bodyText = $("body").text();
+  const text = (mainText || bodyText || "").replace(/\s+/g, " ").trim();
+  return text;
+};
 
-    if (mode !== "text" || !text || text.length < 50) {
-      return NextResponse.json(
-        { error: "invalid_input", message: "Provide text mode with at least 50 characters." },
-        { status: 400 },
-      );
-    }
+const isAllowedUrl = (url: URL) => {
+  const protocolOk = url.protocol === "http:" || url.protocol === "https:";
+  return protocolOk && allowedHosts.some((host) => url.hostname.toLowerCase().endsWith(host));
+};
 
-    if (!process.env.OPENAI_API_KEY) {
-      console.error("OPENAI_API_KEY is missing");
-      return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
-    }
-
-    const anonymizedText = anonymizeText(text);
-
-    const response = await client.chat.completions.create({
-      model: "gpt-4.1-mini",
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: `
+const generateProfile = async (anonymizedText: string): Promise<Profile> => {
+  const response = await client.chat.completions.create({
+    model: "gpt-4.1-mini",
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content: `
 You are a psychologist and productivity coach.
 Given an anonymized conversation between a human and an AI assistant,
 infer a short cognitive + communication profile of the human.
@@ -65,38 +70,99 @@ interface Profile {
   confidence: "low" | "medium" | "high";
 }
           `.trim(),
-        },
-        {
-          role: "user",
-          content: `
+      },
+      {
+        role: "user",
+        content: `
 Here is the anonymized conversation:
 
 ${anonymizedText}
           `.trim(),
-        },
-      ],
-    });
+      },
+    ],
+  });
 
-    const content = response.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error("Empty response content from OpenAI");
+  const content = response.choices[0]?.message?.content;
+  if (!content) {
+    throw new Error("Empty response content from OpenAI");
+  }
+
+  const parsed = JSON.parse(content) as Partial<Profile>;
+
+  return {
+    id: parsed.id || crypto.randomUUID(),
+    thinkingStyle: parsed.thinkingStyle || "",
+    communicationStyle: parsed.communicationStyle || "",
+    strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+    blindSpots: Array.isArray(parsed.blindSpots) ? parsed.blindSpots : [],
+    suggestedWorkflows: Array.isArray(parsed.suggestedWorkflows) ? parsed.suggestedWorkflows : [],
+    confidence: normalizeConfidence(parsed.confidence),
+  };
+};
+
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const mode = body?.mode as string | undefined;
+
+    if (!process.env.OPENAI_API_KEY) {
+      console.error("OPENAI_API_KEY is missing");
+      return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
     }
 
-    const parsed = JSON.parse(content) as Partial<Profile>;
+    if (mode === "text") {
+      const rawText = typeof body?.text === "string" ? body.text : "";
+      const text = rawText.trim();
 
-    const profile: Profile = {
-      id: parsed.id || crypto.randomUUID(),
-      thinkingStyle: parsed.thinkingStyle || "",
-      communicationStyle: parsed.communicationStyle || "",
-      strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
-      blindSpots: Array.isArray(parsed.blindSpots) ? parsed.blindSpots : [],
-      suggestedWorkflows: Array.isArray(parsed.suggestedWorkflows)
-        ? parsed.suggestedWorkflows
-        : [],
-      confidence: normalizeConfidence(parsed.confidence),
-    };
+      if (!text || text.length < 50) {
+        return NextResponse.json(
+          { error: "invalid_input", message: "Provide text mode with at least 50 characters." },
+          { status: 400 },
+        );
+      }
 
-    return NextResponse.json({ profile });
+      const anonymizedText = anonymizeText(text);
+      const profile = await generateProfile(anonymizedText);
+      return NextResponse.json({ profile });
+    }
+
+    if (mode === "url") {
+      const rawUrl = typeof body?.url === "string" ? body.url.trim() : "";
+      let parsedUrl: URL;
+
+      try {
+        parsedUrl = new URL(rawUrl);
+      } catch {
+        return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
+      }
+
+      if (!rawUrl || !isAllowedUrl(parsedUrl)) {
+        return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
+      }
+
+      let html: string;
+      try {
+        const res = await fetch(parsedUrl.toString());
+        if (!res.ok) {
+          return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
+        }
+        html = await res.text();
+      } catch (error) {
+        console.error("Failed to fetch shared URL", error);
+        return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
+      }
+
+      const extracted = extractTextFromHtml(html);
+      if (!extracted || extracted.length < 50) {
+        return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
+      }
+
+      const anonymizedText = anonymizeText(extracted);
+      const profile = await generateProfile(anonymizedText);
+      return NextResponse.json({ profile });
+    }
+
+    return NextResponse.json({ error: "invalid_input" }, { status: 400 });
   } catch (error) {
     console.error("Analyze endpoint failed", error);
     return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
