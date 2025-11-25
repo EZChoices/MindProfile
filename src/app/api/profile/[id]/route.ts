@@ -1,14 +1,15 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { cleanupExpired, deleteProfile, getProfile } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
-  { params }: { params: { id: string } },
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
+  const { id } = await params;
   cleanupExpired();
-  const profile = getProfile(params.id);
+  const profile = getProfile(id);
 
   if (!profile) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
@@ -18,10 +19,11 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: Request,
-  { params }: { params: { id: string } },
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  const removed = deleteProfile(params.id);
+  const { id } = await params;
+  const removed = deleteProfile(id);
   if (!removed) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
