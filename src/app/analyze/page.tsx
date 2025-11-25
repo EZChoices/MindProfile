@@ -5,6 +5,8 @@ import type { Profile } from "@/types/profile";
 
 type Mode = "link" | "text" | "screenshot";
 
+const MIN_TEXT_LENGTH = 50;
+
 const demoText = `User: I'm trying to plan an AI agent that helps with customer tickets. Can you propose a flow?
 AI: Sure! What's the average handle time and where does context live?
 User: We use Slack + Jira. Give me a process map and scripts for the handoffs. Keep it concise and include risks.`;
@@ -33,8 +35,10 @@ export default function AnalyzePage() {
       return;
     }
 
-    if (!pastedText.trim()) {
-      setInputError("Paste at least a few lines of conversation.");
+    const trimmed = pastedText.trim();
+
+    if (trimmed.length < MIN_TEXT_LENGTH) {
+      setInputError("Paste a longer conversation so we can read your style.");
       return;
     }
 
@@ -44,19 +48,19 @@ export default function AnalyzePage() {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: "text", text: pastedText }),
+        body: JSON.stringify({ mode: "text", text: trimmed }),
       });
 
       const data = (await response.json()) as { profile?: Profile };
 
       if (!response.ok || !data?.profile) {
-        setApiError("Something went wrong. Please try again.");
+        setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");
         return;
       }
 
       setProfile(data.profile);
     } catch {
-      setApiError("Something went wrong. Please try again.");
+      setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");
     } finally {
       setLoading(false);
     }
