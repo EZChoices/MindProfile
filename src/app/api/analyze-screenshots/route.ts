@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import OpenAI from "openai";
+import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/types/profile";
 
 const client = new OpenAI({
@@ -98,7 +99,19 @@ interface Profile {
       confidence: normalizeConfidence(parsed.confidence),
     };
 
-    return NextResponse.json({ profile });
+    const profileId = crypto.randomUUID();
+    const profileWithId: Profile = { ...profile, id: profileId };
+    await prisma.profileRecord.create({
+      data: {
+        id: profileId,
+        ingestionType: "screenshots",
+        sourceMeta: "screenshots",
+        anonymizedText: `Screenshots (${files.length}) provided for profiling.`,
+        profileJson: JSON.stringify(profileWithId),
+      },
+    });
+
+    return NextResponse.json({ profile: profileWithId, profileId });
   } catch (error) {
     console.error("Analyze screenshots endpoint failed", error);
     return NextResponse.json({ error: "analysis_failed" }, { status: 500 });

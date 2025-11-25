@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { load } from "cheerio";
 import OpenAI from "openai";
+import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/types/profile";
+
+type IngestionType = "text" | "url";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -100,6 +103,28 @@ ${anonymizedText}
   };
 };
 
+const persistProfile = async (input: {
+  ingestionType: IngestionType;
+  sourceMeta: string;
+  anonymizedText: string;
+  profile: Profile;
+}) => {
+  const profileId = crypto.randomUUID();
+  const profileWithId: Profile = { ...input.profile, id: profileId };
+
+  await prisma.profileRecord.create({
+    data: {
+      id: profileId,
+      ingestionType: input.ingestionType,
+      sourceMeta: input.sourceMeta,
+      anonymizedText: input.anonymizedText,
+      profileJson: JSON.stringify(profileWithId),
+    },
+  });
+
+  return { profileWithId, profileId };
+};
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -123,7 +148,13 @@ export async function POST(request: Request) {
 
       const anonymizedText = anonymizeText(text);
       const profile = await generateProfile(anonymizedText);
-      return NextResponse.json({ profile });
+      const { profileWithId, profileId } = await persistProfile({
+        ingestionType: "text",
+        sourceMeta: "text",
+        anonymizedText,
+        profile,
+      });
+      return NextResponse.json({ profile: profileWithId, profileId });
     }
 
     if (mode === "url") {
@@ -159,7 +190,13 @@ export async function POST(request: Request) {
 
       const anonymizedText = anonymizeText(extracted);
       const profile = await generateProfile(anonymizedText);
-      return NextResponse.json({ profile });
+      const { profileWithId, profileId } = await persistProfile({
+        ingestionType: "url",
+        sourceMeta: parsedUrl.hostname,
+        anonymizedText,
+        profile,
+      });
+      return NextResponse.json({ profile: profileWithId, profileId });
     }
 
     return NextResponse.json({ error: "invalid_input" }, { status: 400 });

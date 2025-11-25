@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Profile } from "@/types/profile";
 
 type Mode = "link" | "text" | "screenshot";
@@ -26,6 +26,9 @@ export default function AnalyzePage() {
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [profileSource, setProfileSource] = useState<ProfileSource | null>(null);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [shareLink, setShareLink] = useState("");
+  const [copied, setCopied] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
 
@@ -39,10 +42,19 @@ export default function AnalyzePage() {
     }
   };
 
+  useEffect(() => {
+    if (profileId && typeof window !== "undefined") {
+      setShareLink(`${window.location.origin}/p/${profileId}`);
+    } else {
+      setShareLink("");
+    }
+  }, [profileId]);
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setInputError(null);
     setApiError(null);
+    setCopied(false);
 
     const trimmedText = pastedText.trim();
     const trimmedUrl = shareUrl.trim();
@@ -68,6 +80,7 @@ export default function AnalyzePage() {
     }
 
     setLoading(true);
+    setProfileId(null);
 
     try {
       const request = () => {
@@ -89,7 +102,7 @@ export default function AnalyzePage() {
 
       const response = await request();
 
-      const data = (await response.json()) as { profile?: Profile; error?: string };
+      const data = (await response.json()) as { profile?: Profile; profileId?: string; error?: string };
 
       if (!response.ok || !data?.profile) {
         if (mode === "link" && data?.error === "invalid_url_or_content") {
@@ -105,6 +118,7 @@ export default function AnalyzePage() {
       }
 
       setProfile(data.profile);
+      setProfileId(data.profileId || data.profile.id);
       setProfileSource(mode === "screenshot" ? "screenshots" : mode);
     } catch {
       setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");
@@ -324,6 +338,39 @@ export default function AnalyzePage() {
           </div>
         )}
 
+        {profile && profileId && (
+          <div className="glass card-border space-y-4 rounded-3xl p-6 sm:p-10">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Share this profile</p>
+                <p className="muted text-sm">Send this link to view the read-only snapshot.</p>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!shareLink) return;
+                  try {
+                    await navigator.clipboard.writeText(shareLink);
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  } catch {
+                    setCopied(false);
+                  }
+                }}
+                disabled={!shareLink}
+                className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              >
+                {copied ? "Copied" : "Copy link"}
+              </button>
+            </div>
+            <input
+              readOnly
+              value={shareLink}
+              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none"
+            />
+          </div>
+        )}
+
         <div className="glass card-border grid gap-6 rounded-3xl p-6 sm:p-10">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="font-[var(--font-display)] text-2xl text-white">
@@ -350,7 +397,7 @@ export default function AnalyzePage() {
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Result</div>
               <p className="muted mt-2">
-                We store your profile in-memory for this session and give you a shareable link.
+                We store your profile briefly so you can use and share the generated snapshot.
               </p>
             </div>
           </div>
