@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Profile } from "@/types/profile";
 
 type Mode = "link" | "text" | "screenshot";
+type ProfileSource = "text" | "link" | "screenshots";
 
 const MIN_TEXT_LENGTH = 50;
 
@@ -14,18 +15,29 @@ User: We use Slack + Jira. Give me a process map and scripts for the handoffs. K
 const modeCopy: Record<Mode, string> = {
   link: "Paste a public ChatGPT/Claude/Gemini share link.",
   text: "Paste 1-3 great chats or transcripts. More detail = better profile.",
-  screenshot: "Upload up to 5 screenshots. Coming soon.",
+  screenshot: "Upload up to 5 screenshots of a chat. Works from your phone.",
 };
 
 export default function AnalyzePage() {
   const [mode, setMode] = useState<Mode>("text");
   const [shareUrl, setShareUrl] = useState("");
   const [pastedText, setPastedText] = useState("");
+  const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [profileSource, setProfileSource] = useState<"text" | "link" | null>(null);
+  const [profileSource, setProfileSource] = useState<ProfileSource | null>(null);
   const [inputError, setInputError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+
+  const handleScreenshotSelect = (files: FileList | null) => {
+    const next = Array.from(files ?? []).slice(0, 5);
+    setScreenshotFiles(next);
+    setInputError(null);
+    setApiError(null);
+    if ((files?.length || 0) > 5) {
+      setInputError("Upload up to 5 images.");
+    }
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -45,6 +57,11 @@ export default function AnalyzePage() {
         setInputError("Paste a share link to analyze.");
         return;
       }
+    } else if (mode === "screenshot") {
+      if (screenshotFiles.length === 0) {
+        setInputError("Upload at least one screenshot to analyze.");
+        return;
+      }
     } else {
       setApiError("Something went wrong. Please try again.");
       return;
@@ -53,20 +70,32 @@ export default function AnalyzePage() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body:
-          mode === "text"
-            ? JSON.stringify({ mode: "text", text: trimmedText })
-            : JSON.stringify({ mode: "url", url: trimmedUrl }),
-      });
+      const request = () => {
+        if (mode === "text" || mode === "link") {
+          return fetch("/api/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body:
+              mode === "text"
+                ? JSON.stringify({ mode: "text", text: trimmedText })
+                : JSON.stringify({ mode: "url", url: trimmedUrl }),
+          });
+        }
+
+        const formData = new FormData();
+        screenshotFiles.forEach((file) => formData.append("images", file));
+        return fetch("/api/analyze-screenshots", { method: "POST", body: formData });
+      };
+
+      const response = await request();
 
       const data = (await response.json()) as { profile?: Profile; error?: string };
 
       if (!response.ok || !data?.profile) {
         if (mode === "link" && data?.error === "invalid_url_or_content") {
           setApiError("We couldn't read that link. Try a different one or paste the conversation text instead.");
+        } else if (mode === "screenshot") {
+          setApiError("We couldn't read those screenshots. Try fewer images or a clearer chat.");
         } else if (mode === "link") {
           setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");
         } else {
@@ -76,7 +105,7 @@ export default function AnalyzePage() {
       }
 
       setProfile(data.profile);
-      setProfileSource(mode);
+      setProfileSource(mode === "screenshot" ? "screenshots" : mode);
     } catch {
       setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");
     } finally {
@@ -110,13 +139,11 @@ export default function AnalyzePage() {
         >
           <div className="grid gap-3 sm:grid-cols-3">
             {(["link", "text", "screenshot"] as Mode[]).map((option) => {
-              const disabled = option === "screenshot";
               const active = mode === option;
               return (
                 <button
                   key={option}
                   type="button"
-                  disabled={disabled}
                   onClick={() => {
                     setMode(option);
                     setInputError(null);
@@ -126,7 +153,7 @@ export default function AnalyzePage() {
                     active
                       ? "border-emerald-300/70 bg-emerald-300/15 text-white"
                       : "border-white/10 bg-white/5 text-slate-200 hover:border-white/30"
-                  } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+                  }`}
                 >
                   <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                     {option === "link" && "Share URL"}
@@ -186,8 +213,29 @@ export default function AnalyzePage() {
             )}
 
             {mode === "screenshot" && (
-              <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
-                Screenshot ingestion is coming soon. Paste the text version of the chat for now.
+              <div className="space-y-3">
+                <label className="dropzone flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-200 hover:border-emerald-300/60">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleScreenshotSelect(e.target.files)}
+                  />
+                  <span className="pill px-4 py-2 text-xs font-semibold text-slate-900">Upload files</span>
+                  <p className="muted text-center text-xs">
+                    Upload up to 5 screenshots of a chat. Works from your phone.
+                  </p>
+                  {screenshotFiles.length > 0 && (
+                    <p className="text-xs text-emerald-200">{screenshotFiles.length} file(s) selected</p>
+                  )}
+                </label>
+                <div className="flex items-start justify-between gap-3">
+                  <p className="text-xs text-slate-200">
+                    {"We'll extract text from the images and profile the human."}
+                  </p>
+                  {inputError && <span className="text-xs text-red-200">{inputError}</span>}
+                </div>
               </div>
             )}
           </div>
@@ -198,7 +246,7 @@ export default function AnalyzePage() {
             </div>
             <button
               type="submit"
-              disabled={loading || mode === "screenshot"}
+              disabled={loading}
               className="inline-flex items-center justify-center rounded-full bg-gradient-to-r from-emerald-300 to-sky-300 px-6 py-3 text-sm font-semibold text-slate-900 shadow-lg shadow-emerald-500/30 transition hover:translate-y-[-1px] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? "Analyzing..." : "Generate profile"}
@@ -224,7 +272,9 @@ export default function AnalyzePage() {
                 )}
               </div>
               <span className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-4 py-2 text-xs text-emerald-50">
-                {profileSource === "link" ? "Generated from share URL" : "Generated from pasted text"}
+                {profileSource === "link" && "Generated from share URL"}
+                {profileSource === "text" && "Generated from pasted text"}
+                {profileSource === "screenshots" && "Generated from screenshots"}
               </span>
             </div>
 
