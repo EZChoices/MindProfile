@@ -1,9 +1,9 @@
 MindProfile
 ===========
 
-MindProfile is a Next.js + TypeScript web app that ingests AI chat conversations and produces a “mind profile”: thinking style, communication style, strengths, blind spots, usage patterns, and suggested workflows.
+MindProfile is a Next.js + TypeScript web app that ingests AI chat conversations and produces a "mind profile": thinking style, communication style, strengths, blind spots, usage patterns, and suggested workflows.
 
-What’s included
+What's included
 ---------------
 - Landing page that explains the product and ingestion levels.
 - Analyze page for Level 1 intake: share link, paste text, or upload screenshots.
