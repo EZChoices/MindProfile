@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  experimental: {
+    // Ensure Turbopack can read system certificates when fetching Google Fonts during builds
+    turbopackUseSystemTlsCerts: true,
+  },
 };
 
 export default nextConfig;
