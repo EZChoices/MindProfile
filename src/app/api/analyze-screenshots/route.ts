@@ -99,17 +99,28 @@ interface Profile {
       confidence: normalizeConfidence(parsed.confidence),
     };
 
-    const profileId = crypto.randomUUID();
-    const profileWithId: Profile = { ...profile, id: profileId };
-    await prisma.profileRecord.create({
-      data: {
-        id: profileId,
-        ingestionType: "screenshots",
-        sourceMeta: "screenshots",
-        anonymizedText: `Screenshots (${files.length}) provided for profiling.`,
-        profileJson: JSON.stringify(profileWithId),
-      },
-    });
+    let profileId: string | null = null;
+    let profileWithId: Profile = { ...profile, id: profile.id || crypto.randomUUID() };
+
+    if (!process.env.DATABASE_URL) {
+      console.warn("DATABASE_URL missing; returning non-persisted profile for screenshots");
+    } else {
+      try {
+        profileId = crypto.randomUUID();
+        profileWithId = { ...profile, id: profileId };
+        await prisma.profileRecord.create({
+          data: {
+            id: profileId,
+            ingestionType: "screenshots",
+            sourceMeta: "screenshots",
+            anonymizedText: `Screenshots (${files.length}) provided for profiling.`,
+            profileJson: JSON.stringify(profileWithId),
+          },
+        });
+      } catch (error) {
+        console.error("Persisting screenshots profile failed; returning non-persisted profile", error);
+      }
+    }
 
     return NextResponse.json({ profile: profileWithId, profileId });
   } catch (error) {

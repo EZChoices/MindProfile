@@ -118,7 +118,7 @@ export default function AnalyzePage() {
       }
 
       setProfile(data.profile);
-      setProfileId(data.profileId || data.profile.id);
+      setProfileId(data.profileId ?? null);
       setProfileSource(mode === "screenshot" ? "screenshots" : mode);
     } catch {
       setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");

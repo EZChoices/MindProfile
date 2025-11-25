@@ -109,20 +109,33 @@ const persistProfile = async (input: {
   anonymizedText: string;
   profile: Profile;
 }) => {
-  const profileId = crypto.randomUUID();
-  const profileWithId: Profile = { ...input.profile, id: profileId };
+  // If persistence fails (or DB not configured), fall back to returning a non-shareable profile.
+  if (!process.env.DATABASE_URL) {
+    console.warn("DATABASE_URL missing; returning non-persisted profile");
+    const profileId = crypto.randomUUID();
+    return { profileWithId: { ...input.profile, id: profileId }, profileId: null as string | null };
+  }
 
-  await prisma.profileRecord.create({
-    data: {
-      id: profileId,
-      ingestionType: input.ingestionType,
-      sourceMeta: input.sourceMeta,
-      anonymizedText: input.anonymizedText,
-      profileJson: JSON.stringify(profileWithId),
-    },
-  });
+  try {
+    const profileId = crypto.randomUUID();
+    const profileWithId: Profile = { ...input.profile, id: profileId };
 
-  return { profileWithId, profileId };
+    await prisma.profileRecord.create({
+      data: {
+        id: profileId,
+        ingestionType: input.ingestionType,
+        sourceMeta: input.sourceMeta,
+        anonymizedText: input.anonymizedText,
+        profileJson: JSON.stringify(profileWithId),
+      },
+    });
+
+    return { profileWithId, profileId };
+  } catch (error) {
+    console.error("Persisting profile failed; returning non-persisted profile", error);
+    const profileId = crypto.randomUUID();
+    return { profileWithId: { ...input.profile, id: profileId }, profileId: null as string | null };
+  }
 };
 
 export async function POST(request: Request) {
