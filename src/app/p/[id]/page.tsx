@@ -51,6 +51,10 @@ const NotFound = () => (
 
 export default async function ProfilePage({ params }: { params: { id: string } }) {
   const id = params.id;
+  if (!id) {
+    console.error("Profile id missing in route params", { params, database: process.env.DATABASE_URL });
+    return <NotFound />;
+  }
   let record: RecordSelection | null = null;
 
   try {
