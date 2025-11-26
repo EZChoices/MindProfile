@@ -49,10 +49,23 @@ const NotFound = () => (
   </main>
 );
 
-export default async function ProfilePage({ params }: { params: { id: string } }) {
-  const id = params.id;
+export default async function ProfilePage({
+  params,
+}: {
+  params: { id: string } | Promise<{ id: string }>;
+}) {
+  const resolvedParams =
+    typeof (params as Promise<{ id: string }>).then === "function"
+      ? await (params as Promise<{ id: string }>)
+      : (params as { id: string });
+
+  const id = resolvedParams?.id;
   if (!id) {
-    console.error("Profile id missing in route params", { params, database: process.env.DATABASE_URL });
+    console.error("Profile id missing in route params", {
+      params,
+      resolvedParams,
+      database: process.env.DATABASE_URL,
+    });
     return <NotFound />;
   }
   let record: RecordSelection | null = null;
