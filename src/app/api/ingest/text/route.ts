@@ -1,30 +1,54 @@
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 import { generateProfileSummary } from "@/lib/profiler";
-import { storeProfile } from "@/lib/store";
+
+const toConfidenceLabel = (value: number) => {
+  if (value >= 0.66) return "high" as const;
+  if (value < 0.33) return "low" as const;
+  return "medium" as const;
+};
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const text = body?.text as string | undefined;
 
-    if (!text || text.trim().length < 20) {
+    if (!text || text.trim().length < 50) {
       return NextResponse.json(
         { error: "Please provide at least a few sentences of text." },
         { status: 400 },
       );
     }
 
-    const { sanitizedText, summary } = await generateProfileSummary(text, "text");
+    const trimmed = text.trim();
+    const { sanitizedText, summary } = await generateProfileSummary(trimmed, "text");
 
-    const profile = storeProfile({
-      sanitizedText,
-      summary,
-      ingestionType: "text",
-      source: "Pasted conversation",
-      meta: { characters: text.length },
+    const confidence = toConfidenceLabel(summary.confidence);
+
+    const dbProfile = await prisma.profile.create({
+      data: {
+        sourceMode: "text",
+        confidence,
+        thinkingStyle: summary.thinkingStyle,
+        communicationStyle: summary.communicationStyle,
+        strengthsJson: JSON.stringify(summary.strengths ?? []),
+        blindSpotsJson: JSON.stringify(summary.blindSpots ?? []),
+        suggestedJson: JSON.stringify(summary.recommendations ?? []),
+        rawText: sanitizedText,
+      },
     });
 
-    return NextResponse.json({ profileId: profile.id, profile });
+    const responseProfile = {
+      id: dbProfile.id,
+      thinkingStyle: summary.thinkingStyle,
+      communicationStyle: summary.communicationStyle,
+      strengths: summary.strengths ?? [],
+      blindSpots: summary.blindSpots ?? [],
+      suggestedWorkflows: summary.recommendations ?? [],
+      confidence,
+    };
+
+    return NextResponse.json({ profileId: dbProfile.id, profile: responseProfile });
   } catch (error) {
     console.error("Text ingest failed", error);
     return NextResponse.json(
