@@ -3,8 +3,11 @@ import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: NextRequest, { params }: { params: { id: string } }) {
-  const id = params.id;
+export async function GET(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
   if (!id) {
     return NextResponse.json({ error: "Profile id is required" }, { status: 400 });
   }
@@ -28,8 +31,11 @@ export async function GET(_request: NextRequest, { params }: { params: { id: str
   }
 }
 
-export async function DELETE(_request: NextRequest, { params }: { params: { id: string } }) {
-  const id = params.id;
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
   if (!id) {
     return NextResponse.json({ error: "Profile id is required" }, { status: 400 });
   }
