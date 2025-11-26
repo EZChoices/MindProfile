@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/types/profile";
 
+export const dynamic = 'force-dynamic';
+
 const toProfile = (record: {
   id: string;
   confidence: string;
@@ -35,9 +37,21 @@ const toProfile = (record: {
   return profile;
 };
 
-export default async function ProfilePage({ params }: { params: { id: string } }) {
+export default async function ProfilePage({ params, searchParams }: { params?: { id?: string }; searchParams?: { nxtPid?: string } }) {
+  const id = params?.id ?? searchParams?.nxtPid;
+  if (!id) {
+    return (
+      <main className="beam gridlines flex min-h-screen items-center justify-center px-6 py-10">
+        <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-slate-200">
+          <h1 className="font-[var(--font-display)] text-2xl text-white">Profile not found</h1>
+          <p className="muted mt-2 text-sm">This link may be expired or the profile was deleted.</p>
+        </div>
+      </main>
+    );
+  }
+
   const record = await prisma.profile.findUnique({
-    where: { id: params.id },
+    where: { id },
     select: {
       id: true,
       confidence: true,
