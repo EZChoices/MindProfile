@@ -9,14 +9,18 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
 }
 
-model ProfileRecord {
-  id             String   @id @default(cuid())
-  createdAt      DateTime @default(now())
-  ingestionType  String
-  sourceMeta     String?
-  anonymizedText String
-  profileJson    String
+model Profile {
+  id                 String   @id @default(cuid())
+  createdAt          DateTime @default(now())
+  sourceMode         String
+  confidence         String
+  thinkingStyle      String
+  communicationStyle String
+  strengthsJson      String
+  blindSpotsJson     String
+  suggestedJson      String
+  rawText            String
 }

@@ -99,30 +99,23 @@ interface Profile {
       confidence: normalizeConfidence(parsed.confidence),
     };
 
-    let profileId: string | null = null;
-    let profileWithId: Profile = { ...profile, id: profile.id || crypto.randomUUID() };
+    const anonymizedText = "Screenshots provided for profiling.";
+    const dbProfile = await prisma.profile.create({
+      data: {
+        sourceMode: "screenshots",
+        confidence: profile.confidence,
+        thinkingStyle: profile.thinkingStyle,
+        communicationStyle: profile.communicationStyle,
+        strengthsJson: JSON.stringify(profile.strengths),
+        blindSpotsJson: JSON.stringify(profile.blindSpots),
+        suggestedJson: JSON.stringify(profile.suggestedWorkflows),
+        rawText: anonymizedText,
+      },
+    });
 
-    if (!process.env.DATABASE_URL) {
-      console.warn("DATABASE_URL missing; returning non-persisted profile for screenshots");
-    } else {
-      try {
-        profileId = crypto.randomUUID();
-        profileWithId = { ...profile, id: profileId };
-        await prisma.profileRecord.create({
-          data: {
-            id: profileId,
-            ingestionType: "screenshots",
-            sourceMeta: "screenshots",
-            anonymizedText: `Screenshots (${files.length}) provided for profiling.`,
-            profileJson: JSON.stringify(profileWithId),
-          },
-        });
-      } catch (error) {
-        console.error("Persisting screenshots profile failed; returning non-persisted profile", error);
-      }
-    }
+    const profileWithId: Profile = { ...profile, id: dbProfile.id };
 
-    return NextResponse.json({ profile: profileWithId, profileId });
+    return NextResponse.json({ profile: profileWithId, profileId: dbProfile.id });
   } catch (error) {
     console.error("Analyze screenshots endpoint failed", error);
     return NextResponse.json({ error: "analysis_failed" }, { status: 500 });

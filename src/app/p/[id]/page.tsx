@@ -1,28 +1,56 @@
-import type { Profile } from "@/types/profile";
 import { prisma } from "@/lib/prisma";
+import type { Profile } from "@/types/profile";
 
-const sourceLabel = (ingestionType: string) => {
-  if (ingestionType === "url") return "Generated from share URL";
-  if (ingestionType === "screenshots") return "Generated from screenshots";
-  return "Generated from pasted text";
+const toProfile = (record: {
+  id: string;
+  confidence: string;
+  thinkingStyle: string;
+  communicationStyle: string;
+  strengthsJson: string;
+  blindSpotsJson: string;
+  suggestedJson: string;
+}) => {
+  const parseArray = (value: string) => {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? (parsed as string[]) : [];
+    } catch {
+      return [];
+    }
+  };
+
+  const confidence =
+    record.confidence === "low" || record.confidence === "high" ? record.confidence : "medium";
+
+  const profile: Profile = {
+    id: record.id,
+    confidence,
+    thinkingStyle: record.thinkingStyle,
+    communicationStyle: record.communicationStyle,
+    strengths: parseArray(record.strengthsJson),
+    blindSpots: parseArray(record.blindSpotsJson),
+    suggestedWorkflows: parseArray(record.suggestedJson),
+  };
+
+  return profile;
 };
 
-async function fetchProfile(id: string) {
-  try {
-    const record = await prisma.profileRecord.findUnique({ where: { id } });
-    if (!record) return null;
-    const profile = JSON.parse(record.profileJson) as Profile;
-    return { profile, ingestionType: record.ingestionType };
-  } catch (error) {
-    console.error("Failed to load profile", error);
-    return null;
-  }
-}
-
 export default async function ProfilePage({ params }: { params: { id: string } }) {
-  const data = await fetchProfile(params.id);
+  const record = await prisma.profile.findUnique({
+    where: { id: params.id },
+    select: {
+      id: true,
+      confidence: true,
+      thinkingStyle: true,
+      communicationStyle: true,
+      strengthsJson: true,
+      blindSpotsJson: true,
+      suggestedJson: true,
+      sourceMode: true,
+    },
+  });
 
-  if (!data) {
+  if (!record) {
     return (
       <main className="beam gridlines flex min-h-screen items-center justify-center px-6 py-10">
         <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-slate-200">
@@ -33,10 +61,17 @@ export default async function ProfilePage({ params }: { params: { id: string } }
     );
   }
 
-  const { profile, ingestionType } = data;
+  const profile = toProfile(record);
   const confidenceLabel = `${profile.confidence.charAt(0).toUpperCase()}${profile.confidence.slice(
     1,
   )}`;
+
+  const sourceLabel =
+    record.sourceMode === "url"
+      ? "Generated from share URL"
+      : record.sourceMode === "screenshots"
+        ? "Generated from screenshots"
+        : "Generated from pasted text";
 
   return (
     <main className="beam gridlines min-h-screen px-6 py-10 sm:px-10">
@@ -62,7 +97,7 @@ export default async function ProfilePage({ params }: { params: { id: string } }
               <p className="muted mt-1 text-sm">Confidence: {confidenceLabel}</p>
             </div>
             <span className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-4 py-2 text-xs text-emerald-50">
-              {sourceLabel(ingestionType)}
+              {sourceLabel}
             </span>
           </div>
 
