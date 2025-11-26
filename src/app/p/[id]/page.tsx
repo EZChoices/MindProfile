@@ -3,6 +3,17 @@ import type { Profile } from "@/types/profile";
 
 export const dynamic = "force-dynamic";
 
+type RecordSelection = {
+  id: string;
+  sourceMode: string;
+  confidence: string;
+  thinkingStyle: string;
+  communicationStyle: string;
+  strengthsJson: string;
+  blindSpotsJson: string;
+  suggestedJson: string;
+};
+
 const parseArray = (value: string) => {
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -12,15 +23,7 @@ const parseArray = (value: string) => {
   }
 };
 
-const toProfile = (record: {
-  id: string;
-  confidence: string;
-  thinkingStyle: string;
-  communicationStyle: string;
-  strengthsJson: string;
-  blindSpotsJson: string;
-  suggestedJson: string;
-}) => {
+const toProfile = (record: RecordSelection) => {
   const confidence =
     record.confidence === "low" || record.confidence === "high" ? record.confidence : "medium";
 
@@ -48,10 +51,10 @@ const NotFound = () => (
 
 export default async function ProfilePage({ params }: { params: { id: string } }) {
   const id = params.id;
-  let record: Awaited<ReturnType<typeof prisma.profile.findUnique>> | null = null;
+  let record: RecordSelection | null = null;
 
   try {
-    record = await prisma.profile.findUnique({
+    record = (await prisma.profile.findUnique({
       where: { id },
       select: {
         id: true,
@@ -63,7 +66,7 @@ export default async function ProfilePage({ params }: { params: { id: string } }
         suggestedJson: true,
         sourceMode: true,
       },
-    });
+    })) as RecordSelection | null;
   } catch (error) {
     console.error("Profile lookup failed", { id, error, database: process.env.DATABASE_URL });
     return <NotFound />;
