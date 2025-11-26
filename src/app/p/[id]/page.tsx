@@ -1,7 +1,16 @@
 import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/types/profile";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
+
+const parseArray = (value: string) => {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+};
 
 const toProfile = (record: {
   id: string;
@@ -12,15 +21,6 @@ const toProfile = (record: {
   blindSpotsJson: string;
   suggestedJson: string;
 }) => {
-  const parseArray = (value: string) => {
-    try {
-      const parsed = JSON.parse(value) as unknown;
-      return Array.isArray(parsed) ? (parsed as string[]) : [];
-    } catch {
-      return [];
-    }
-  };
-
   const confidence =
     record.confidence === "low" || record.confidence === "high" ? record.confidence : "medium";
 
@@ -37,42 +37,41 @@ const toProfile = (record: {
   return profile;
 };
 
-export default async function ProfilePage({ params, searchParams }: { params?: { id?: string }; searchParams?: { nxtPid?: string } }) {
-  const id = params?.id ?? searchParams?.nxtPid;
-  if (!id) {
-    return (
-      <main className="beam gridlines flex min-h-screen items-center justify-center px-6 py-10">
-        <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-slate-200">
-          <h1 className="font-[var(--font-display)] text-2xl text-white">Profile not found</h1>
-          <p className="muted mt-2 text-sm">This link may be expired or the profile was deleted.</p>
-        </div>
-      </main>
-    );
+const NotFound = () => (
+  <main className="beam gridlines flex min-h-screen items-center justify-center px-6 py-10">
+    <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-slate-200">
+      <h1 className="font-[var(--font-display)] text-2xl text-white">Profile not found</h1>
+      <p className="muted mt-2 text-sm">This link may be expired or the profile was deleted.</p>
+    </div>
+  </main>
+);
+
+export default async function ProfilePage({ params }: { params: { id: string } }) {
+  const id = params.id;
+  let record: Awaited<ReturnType<typeof prisma.profile.findUnique>> | null = null;
+
+  try {
+    record = await prisma.profile.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        confidence: true,
+        thinkingStyle: true,
+        communicationStyle: true,
+        strengthsJson: true,
+        blindSpotsJson: true,
+        suggestedJson: true,
+        sourceMode: true,
+      },
+    });
+  } catch (error) {
+    console.error("Profile lookup failed", { id, error, database: process.env.DATABASE_URL });
+    return <NotFound />;
   }
 
-  const record = await prisma.profile.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      confidence: true,
-      thinkingStyle: true,
-      communicationStyle: true,
-      strengthsJson: true,
-      blindSpotsJson: true,
-      suggestedJson: true,
-      sourceMode: true,
-    },
-  });
-
   if (!record) {
-    return (
-      <main className="beam gridlines flex min-h-screen items-center justify-center px-6 py-10">
-        <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-slate-200">
-          <h1 className="font-[var(--font-display)] text-2xl text-white">Profile not found</h1>
-          <p className="muted mt-2 text-sm">This link may be expired or the profile was deleted.</p>
-        </div>
-      </main>
-    );
+    console.error("Profile not found", { id, database: process.env.DATABASE_URL });
+    return <NotFound />;
   }
 
   const profile = toProfile(record);
