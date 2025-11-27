@@ -175,6 +175,7 @@ export default function AnalyzePage() {
                       ? "bg-emerald-300/20 text-white"
                       : "text-slate-200 hover:bg-white/5"
                   }`}
+                  aria-pressed={active}
                 >
                   {option === "link" && "Share link"}
                   {option === "text" && "Paste text"}
@@ -183,7 +184,10 @@ export default function AnalyzePage() {
               );
             })}
           </div>
-          <p className="muted text-xs text-slate-200">{modeCopy[mode]}</p>
+          <div className="flex items-start justify-between gap-3">
+            <p className="muted text-xs text-slate-200">{modeCopy[mode]}</p>
+            <p className="text-[11px] text-slate-300">We only analyze what you provide; sensitive details are stripped.</p>
+          </div>
 
           <div className="space-y-3">
             <label className="text-sm font-semibold text-white">
