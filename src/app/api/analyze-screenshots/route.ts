@@ -40,6 +40,7 @@ export async function POST(request: Request) {
     const analysis = await analyzeConversation({
       normalizedText: normalized.normalizedText,
       inputCharCount: normalized.inputCharCount,
+      userMessageCount: normalized.userMessageCount,
       sourceMode: "screenshots",
     });
 

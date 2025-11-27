@@ -6,6 +6,7 @@ export interface NormalizedInput {
   inputCharCount: number;
   sourceMode: SourceMode;
   inputSourceHost?: string | null;
+  userMessageCount: number;
 }
 
 const cleanWhitespace = (text: string) =>
@@ -15,6 +16,14 @@ const cleanWhitespace = (text: string) =>
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 
+export const estimateUserMessageCount = (normalizedText: string): number => {
+  const lines = normalizedText.split(/\r?\n/);
+  const userLike = lines.filter((line) => /^\s*(User:|Human:)/i.test(line));
+  if (userLike.length > 0) return userLike.length;
+  const nonEmpty = lines.filter((line) => line.trim().length > 0);
+  return nonEmpty.length;
+};
+
 export const normalizeTextInput = (raw: string): NormalizedInput => {
   const { sanitized } = anonymizeText(raw);
   const normalizedText = cleanWhitespace(sanitized);
@@ -23,6 +32,7 @@ export const normalizeTextInput = (raw: string): NormalizedInput => {
     inputCharCount: normalizedText.length,
     sourceMode: "text",
     inputSourceHost: null,
+    userMessageCount: estimateUserMessageCount(normalizedText),
   };
 };
 
@@ -42,6 +52,7 @@ export const normalizeUrlInput = (rawText: string, url: string): NormalizedInput
     inputCharCount: normalizedText.length,
     sourceMode: "url",
     inputSourceHost: host,
+    userMessageCount: estimateUserMessageCount(normalizedText),
   };
 };
 
@@ -54,5 +65,6 @@ export const normalizeScreenshotInput = (ocrTexts: string[]): NormalizedInput =>
     inputCharCount: normalizedText.length,
     sourceMode: "screenshots",
     inputSourceHost: null,
+    userMessageCount: estimateUserMessageCount(normalizedText),
   };
 };

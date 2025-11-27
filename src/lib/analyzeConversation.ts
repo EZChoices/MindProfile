@@ -5,6 +5,7 @@ import type { Profile, SourceMode } from "@/types/profile";
 export interface AnalyzeInput {
   normalizedText: string;
   inputCharCount: number;
+  userMessageCount: number;
   sourceMode: SourceMode;
   modelOverride?: string;
 }
@@ -17,8 +18,8 @@ export interface AnalyzeResult {
   completionTokens?: number;
 }
 
-const PROMPT_VERSION = "v0.3";
-const PROMPT_VERSION_INSUFFICIENT = "v0.3-insufficient";
+const PROMPT_VERSION = "v0.4";
+const PROMPT_VERSION_INSUFFICIENT = "v0.4-insufficient";
 const MIN_CHARS_FOR_PROFILE = 220;
 
 const client = new OpenAI({
@@ -118,12 +119,22 @@ const buildInsufficientDataProfile = (): Profile => ({
   confidence: "low",
 });
 
-const adjustConfidence = (profile: Profile, inputCharCount: number): Profile => {
-  const adjusted: Profile = { ...profile };
-  if (inputCharCount < 400) adjusted.confidence = "low";
-  else if (inputCharCount < 1200) adjusted.confidence = "medium";
-  else adjusted.confidence = "high";
-  return adjusted;
+const overrideConfidence = (
+  profile: Profile,
+  inputCharCount: number,
+  userMessageCount: number,
+): Profile => {
+  const result: Profile = { ...profile };
+  if (inputCharCount < 350 || userMessageCount <= 2) {
+    result.confidence = "low";
+    return result;
+  }
+  if (inputCharCount > 1100 || userMessageCount >= 8) {
+    result.confidence = "high";
+    return result;
+  }
+  result.confidence = "medium";
+  return result;
 };
 
 export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeResult> {
@@ -135,7 +146,7 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
       sourceMode: input.sourceMode,
       inputCharCount: input.inputCharCount,
     };
-    const adjusted = adjustConfidence(profile, input.inputCharCount);
+    const adjusted = overrideConfidence(profile, input.inputCharCount, input.userMessageCount);
     return {
       profile: adjusted,
       modelUsed: "none",
@@ -147,6 +158,7 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
 
   const userContent = `
 Approximate input length (characters): ${input.inputCharCount}
+Approximate user messages: ${input.userMessageCount}
 
 Here is the anonymized conversation text (may include multiple chats):
 
@@ -160,6 +172,7 @@ ${input.normalizedText}
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ],
+    temperature: 0.6,
   });
 
   const content = completion.choices[0]?.message?.content;
@@ -181,7 +194,7 @@ ${input.normalizedText}
     inputCharCount: input.inputCharCount,
   };
 
-  profile = adjustConfidence(profile, input.inputCharCount);
+  profile = overrideConfidence(profile, input.inputCharCount, input.userMessageCount);
 
   return {
     profile,
