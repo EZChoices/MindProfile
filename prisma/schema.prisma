@@ -30,6 +30,9 @@ model Profile {
   promptTokens       Int?
   completionTokens   Int?
   deletedAt          DateTime?
+  resonance          String?
+  feedbackText       String?
+  feedbackAt         DateTime?
 
   @@index([createdAt])
   @@index([sourceMode])

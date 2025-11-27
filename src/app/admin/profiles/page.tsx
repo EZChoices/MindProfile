@@ -9,7 +9,9 @@ const formatDate = (date: Date) =>
 export default async function AdminProfilesPage({
   searchParams,
 }: {
-  searchParams: Promise<Record<string, string | string[] | undefined>> | Record<string, string | string[] | undefined>;
+  searchParams:
+    | Promise<Record<string, string | string[] | undefined>>
+    | Record<string, string | string[] | undefined>;
 }) {
   const resolvedParams =
     typeof (searchParams as Promise<Record<string, string | string[] | undefined>>).then === "function"
@@ -17,13 +19,13 @@ export default async function AdminProfilesPage({
       : (searchParams as Record<string, string | string[] | undefined>);
 
   const providedKey = typeof resolvedParams.key === "string" ? resolvedParams.key : undefined;
-  const requiredKey = process.env.ADMIN_SECRET;
+  const requiredKey = process.env.ADMIN_KEY;
 
   if (requiredKey && providedKey !== requiredKey) {
     return (
       <main className="min-h-screen bg-slate-950 px-6 py-10 text-white">
         <div className="mx-auto max-w-3xl rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
-          <h1 className="text-2xl font-semibold">Access denied</h1>
+          <h1 className="text-2xl font-semibold">Not authorized</h1>
           <p className="muted mt-3 text-sm text-slate-300">Provide ?key=... to view this page.</p>
         </div>
       </main>
@@ -41,8 +43,17 @@ export default async function AdminProfilesPage({
       inputCharCount: true,
       model: true,
       promptVersion: true,
+      resonance: true,
+      feedbackText: true,
     },
   });
+
+  const resonanceClass = (value: string | null | undefined) => {
+    if (value === "positive") return "text-emerald-200";
+    if (value === "mixed") return "text-amber-200";
+    if (value === "negative") return "text-red-200";
+    return "text-slate-300";
+  };
 
   return (
     <main className="min-h-screen bg-slate-950 px-6 py-10 text-white">
@@ -69,6 +80,8 @@ export default async function AdminProfilesPage({
                 <th className="px-4 py-3">Length</th>
                 <th className="px-4 py-3">Model</th>
                 <th className="px-4 py-3">Prompt</th>
+                <th className="px-4 py-3">Resonance</th>
+                <th className="px-4 py-3">Feedback?</th>
                 <th className="px-4 py-3">Link</th>
               </tr>
             </thead>
@@ -83,6 +96,12 @@ export default async function AdminProfilesPage({
                   </td>
                   <td className="px-4 py-3 text-slate-200">{profile.model}</td>
                   <td className="px-4 py-3 text-slate-200">{profile.promptVersion}</td>
+                  <td className={`px-4 py-3 capitalize ${resonanceClass(profile.resonance)}`}>
+                    {profile.resonance ?? "—"}
+                  </td>
+                  <td className="px-4 py-3 text-slate-200">
+                    {profile.resonance || profile.feedbackText ? "Yes" : "No"}
+                  </td>
                   <td className="px-4 py-3">
                     <Link href={`/p/${profile.id}`} className="text-emerald-200 underline">
                       View
@@ -92,7 +111,7 @@ export default async function AdminProfilesPage({
               ))}
               {profiles.length === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-slate-400" colSpan={7}>
+                  <td className="px-4 py-4 text-slate-400" colSpan={9}>
                     No profiles yet.
                   </td>
                 </tr>

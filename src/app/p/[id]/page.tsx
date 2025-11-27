@@ -14,6 +14,8 @@ type RecordSelection = {
   suggestedJson: unknown;
   createdAt: Date;
   inputCharCount: number;
+  resonance: string | null;
+  feedbackText: string | null;
 };
 
 const parseArray = (value: unknown) => {
@@ -103,6 +105,8 @@ export default async function ProfilePage({
         sourceMode: true,
         createdAt: true,
         inputCharCount: true,
+        resonance: true,
+        feedbackText: true,
       },
     })) as RecordSelection | null;
   } catch (error) {
@@ -221,6 +225,12 @@ export default async function ProfilePage({
             </div>
           </div>
         </div>
+        <ProfileFeedback
+          profileId={profile.id}
+          initialResonance={(record.resonance as Profile["resonance"]) ?? null}
+          initialFeedbackText={record.feedbackText ?? undefined}
+          compact
+        />
         <div className="flex items-center justify-center">
           <a
             href="/analyze"
@@ -233,3 +243,4 @@ export default async function ProfilePage({
     </main>
   );
 }
+import { ProfileFeedback } from "@/components/ProfileFeedback";

@@ -15,4 +15,7 @@ export interface Profile {
   promptVersion?: string;
   createdAt?: string;
   inputSourceHost?: string | null;
+  resonance?: "positive" | "mixed" | "negative" | null;
+  feedbackText?: string | null;
+  feedbackAt?: string | null;
 }

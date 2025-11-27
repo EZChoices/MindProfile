@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Profile, SourceMode } from "@/types/profile";
+import { ProfileFeedback } from "@/components/ProfileFeedback";
 
 type Mode = "link" | "text" | "screenshots";
 type ProfileSource = SourceMode;
@@ -382,6 +383,10 @@ export default function AnalyzePage() {
               className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none"
             />
           </div>
+        )}
+
+        {profileId && (
+          <ProfileFeedback profileId={profileId} compact />
         )}
 
         <div className="glass card-border grid gap-6 rounded-3xl p-6 sm:p-10">
