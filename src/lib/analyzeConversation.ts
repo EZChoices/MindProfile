@@ -17,7 +17,9 @@ export interface AnalyzeResult {
   completionTokens?: number;
 }
 
-const PROMPT_VERSION = "v0.2";
+const PROMPT_VERSION = "v0.3";
+const PROMPT_VERSION_INSUFFICIENT = "v0.3-insufficient";
+const MIN_CHARS_FOR_PROFILE = 220;
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -27,40 +29,120 @@ const systemPrompt = `
 You are a psychologist and productivity coach.
 
 You will receive ANONYMIZED text from one or more conversations between a human and an AI assistant.
-Your job is to infer how the human tends to THINK and COMMUNICATE based ONLY on their messages and requests.
+Your job is to infer how the human tends to THINK and COMMUNICATE based ONLY on their own messages and requests.
 
 Write your output in SECOND PERSON, as if you are talking directly to the user.
-Use phrasing like "You tend to...", "You often...", "You prefer..." instead of "The human" or "The user".
+Use phrasing like "You tend to...", "You often...", "You prefer..." instead of "the human" or "the user".
 
 You must respond ONLY with a JSON object matching this TypeScript type:
 
 interface Profile {
   id: string;
-  thinkingStyle: string;          // 1–2 concise sentences, behavioral, no jargon, written as "You ..."
-  communicationStyle: string;     // 1–2 concise sentences about how they talk / ask, written as "You ..."
-  strengths: string[];            // 3–5 bullets, each 1 sentence, very concrete, starting with "You..." where natural
+  thinkingStyle: string;          // 1–3 concise sentences, behavioral, no jargon, written as "You ..."
+  communicationStyle: string;     // 1–3 concise sentences about how they talk / ask, written as "You ..."
+  strengths: string[];            // 3–5 bullets, each 1 sentence, very concrete and specific
   blindSpots: string[];           // 3–5 bullets, each 1 sentence, gently critical but specific
-  suggestedWorkflows: string[];   // 3–5 bullets, each 1 sentence, actionable ways to use AI better
+  suggestedWorkflows: string[];   // 3–5 bullets, each 1 sentence, actionable ways to use AI and other tools better
   confidence: "low" | "medium" | "high";
 }
 
-Guidelines:
-- Be SPECIFIC and BEHAVIORAL, not vague.
-- Avoid generic filler like "may be", "sometimes", "in general" unless necessary.
-- Prefer concrete patterns like "You ask for X before doing Y" or "You jump straight to implementation."
-- Do NOT summarize the topic of the conversation.
-- Focus only on the human, not the AI.
-- Do not mention anonymization or missing context.
-- Do not add extra fields.
+IMPORTANT BEHAVIORAL GUIDELINES:
+
+1) VARY YOUR LANGUAGE
+- Avoid repeating the same phrases across strengths, blind spots, and workflows.
+- Use different verbs and structures; do not start every bullet with "You may" or "You sometimes".
+- Make each bullet feel like a distinct, concrete observation.
+
+2) CONTEXT-FIRST, NOT TEMPLATE-FIRST
+- Tie your insights directly to patterns you see in the conversation.
+- Think in terms of behaviors: how they ask for help, how they clarify, how they react to suggestions.
+- If they are planning, talk about how they structure plans.
+- If they are emotional, talk about how they express and process feelings.
+- If they are technical, talk about how they approach problem-solving and debugging.
+
+3) SUGGESTED WORKFLOWS MUST BE SPECIFIC TO THE CONTEXT
+- Base suggestions on what the conversation is actually about.
+- Only recommend using AI for project tracking, analytics, or check-ins when the conversation clearly involves teamwork, projects, or ongoing work.
+- For creative writing, focus on drafting, outlining, experimenting with styles, and editing.
+- For research and analysis, focus on structuring questions, comparing sources, and synthesizing information.
+- For personal or emotional topics, focus on reflection, journaling, communication, and support—not generic productivity tools.
+
+4) RICHER THINKING-STYLE DIMENSIONS
+When describing "thinkingStyle", consider 2–3 of these dimensions and weave them into your sentences:
+- reflective vs action-oriented
+- strategic vs tactical
+- detail-oriented vs big-picture
+- risk-averse vs risk-taking
+- structured vs improvisational
+- data-driven vs intuitive
+- collaborative vs independent
+- emotionally expressive vs reserved
+
+You do not need to list these labels explicitly, but let them shape your description.
+
+5) BLIND SPOTS NEED EVIDENCE
+- Every blind-spot bullet should be connected to a visible pattern in the conversation.
+- Briefly hint at why you think this, e.g. "Because you quickly jump to implementation details..." or "Since you mostly ask about edge cases..."
+- Do NOT invent dramatic psychological issues. Stay close to the observable behavior.
+
+6) CONFIDENCE
+- Think about how much evidence you really have.
+- "High" requires a reasonably rich conversation with multiple turns and clear patterns.
+- "Medium" is for somewhat informative but limited data.
+- "Low" is for thin or ambiguous evidence.
+- If in doubt, choose the lower confidence.
+
+7) NO META TALK
+- Do not mention anonymization, tokens, the model, or your own process.
+- Do not reference this prompt or JSON.
+- Do not add extra fields or commentary outside the JSON object.
+
+Respond ONLY with valid JSON matching the Profile type. Do not wrap it in markdown.
 `.trim();
 
-const confidenceFromLength = (inputCharCount: number): Profile["confidence"] => {
-  if (inputCharCount < 400) return "low";
-  if (inputCharCount < 1500) return "medium";
-  return "high";
+const buildInsufficientDataProfile = (): Profile => ({
+  id: "",
+  thinkingStyle: "There isn’t enough conversation here to reliably infer your thinking style.",
+  communicationStyle:
+    "From this small snippet alone, it’s hard to say much about how you usually communicate.",
+  strengths: ["You’re curious enough to start experimenting with AI."],
+  blindSpots: [
+    "With only a very short message, it’s easy to misinterpret your usual behavior.",
+    "Important patterns in how you think and communicate may be completely missing here.",
+  ],
+  suggestedWorkflows: [
+    "Paste a longer conversation where you explain your thinking or ask for help on a real task.",
+    "Include a few back-and-forth turns so we can see how you clarify, react, and adjust.",
+    "Avoid sharing sensitive details, but don’t be afraid to include real problems or decisions.",
+  ],
+  confidence: "low",
+});
+
+const adjustConfidence = (profile: Profile, inputCharCount: number): Profile => {
+  const adjusted: Profile = { ...profile };
+  if (inputCharCount < 400) adjusted.confidence = "low";
+  else if (inputCharCount < 1200) adjusted.confidence = "medium";
+  else adjusted.confidence = "high";
+  return adjusted;
 };
 
 export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeResult> {
+  if (input.inputCharCount < MIN_CHARS_FOR_PROFILE) {
+    const insufficient = buildInsufficientDataProfile();
+    const profile: Profile = {
+      ...insufficient,
+      id: "",
+      sourceMode: input.sourceMode,
+      inputCharCount: input.inputCharCount,
+    };
+    const adjusted = adjustConfidence(profile, input.inputCharCount);
+    return {
+      profile: adjusted,
+      modelUsed: "none",
+      promptVersion: PROMPT_VERSION_INSUFFICIENT,
+    };
+  }
+
   const model = input.modelOverride || config.openAiModel || "gpt-4.1-mini";
 
   const userContent = `
@@ -86,23 +168,20 @@ ${input.normalizedText}
   }
 
   const parsed = JSON.parse(content) as Partial<Profile>;
-  const heuristicConfidence = confidenceFromLength(input.inputCharCount);
-  const profile: Profile = {
-    id: parsed.id || "", // overwritten by caller with DB id
+
+  let profile: Profile = {
+    id: "",
     thinkingStyle: parsed.thinkingStyle || "",
     communicationStyle: parsed.communicationStyle || "",
     strengths: parsed.strengths ?? [],
     blindSpots: parsed.blindSpots ?? [],
     suggestedWorkflows: parsed.suggestedWorkflows ?? [],
-    confidence: parsed.confidence ?? heuristicConfidence,
+    confidence: parsed.confidence ?? "low",
     sourceMode: input.sourceMode,
     inputCharCount: input.inputCharCount,
-    model,
-    promptVersion: PROMPT_VERSION,
   };
 
-  // Apply heuristic override regardless of model output
-  profile.confidence = heuristicConfidence;
+  profile = adjustConfidence(profile, input.inputCharCount);
 
   return {
     profile,
