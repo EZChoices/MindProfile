@@ -33,6 +33,7 @@ model Profile {
   resonance          String?
   feedbackText       String?
   feedbackAt         DateTime?
+  mindCard           Json?
 
   @@index([createdAt])
   @@index([sourceMode])

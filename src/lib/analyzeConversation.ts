@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { config } from "./config";
 import type { Profile, SourceMode } from "@/types/profile";
+import type { MindCard } from "@/types/mindCard";
 
 export interface AnalyzeInput {
   normalizedText: string;

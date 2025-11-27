@@ -18,4 +18,5 @@ export interface Profile {
   resonance?: "positive" | "mixed" | "negative" | null;
   feedbackText?: string | null;
   feedbackAt?: string | null;
+  mindCard?: import("./mindCard").MindCard | null;
 }

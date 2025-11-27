@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { load } from "cheerio";
 import { prisma } from "@/lib/prisma";
 import { analyzeConversation } from "@/lib/analyzeConversation";
 import { normalizeTextInput, normalizeUrlInput } from "@/lib/normalizeInput";
+import { inferMindCard } from "@/lib/inferMindCard";
 import type { Profile, SourceMode } from "@/types/profile";
+import type { MindCard } from "@/types/mindCard";
 
 const allowedHosts = [
   "chatgpt.com",
@@ -57,6 +60,19 @@ export async function POST(request: Request) {
         sourceMode: "text",
       });
 
+      const sampleText =
+        normalized.normalizedText.length > 1200
+          ? normalized.normalizedText.slice(0, 1200)
+          : normalized.normalizedText;
+
+      const mindCard: MindCard = await inferMindCard({
+        profile: {
+          ...analysis.profile,
+          id: "",
+        },
+        sampleText,
+      });
+
       const dbProfile = await prisma.profile.create({
         data: {
           sourceMode: normalized.sourceMode,
@@ -73,6 +89,7 @@ export async function POST(request: Request) {
           inputSourceHost: normalized.inputSourceHost,
           promptTokens: analysis.promptTokens,
           completionTokens: analysis.completionTokens,
+          mindCard: mindCard as unknown as Prisma.InputJsonValue,
         },
       });
 
@@ -85,7 +102,7 @@ export async function POST(request: Request) {
         promptVersion: analysis.promptVersion,
       };
 
-      return NextResponse.json({ profile, profileId: dbProfile.id });
+      return NextResponse.json({ profile, profileId: dbProfile.id, mindCard });
     }
 
     if (mode === "url") {
@@ -127,6 +144,19 @@ export async function POST(request: Request) {
         sourceMode: "url",
       });
 
+      const sampleText =
+        normalized.normalizedText.length > 1200
+          ? normalized.normalizedText.slice(0, 1200)
+          : normalized.normalizedText;
+
+      const mindCard: MindCard = await inferMindCard({
+        profile: {
+          ...analysis.profile,
+          id: "",
+        },
+        sampleText,
+      });
+
       const dbProfile = await prisma.profile.create({
         data: {
           sourceMode: normalized.sourceMode,
@@ -143,6 +173,7 @@ export async function POST(request: Request) {
           inputSourceHost: normalized.inputSourceHost,
           promptTokens: analysis.promptTokens,
           completionTokens: analysis.completionTokens,
+          mindCard: mindCard as unknown as Prisma.InputJsonValue,
         },
       });
 
@@ -155,7 +186,7 @@ export async function POST(request: Request) {
         promptVersion: analysis.promptVersion,
       };
 
-      return NextResponse.json({ profile, profileId: dbProfile.id });
+      return NextResponse.json({ profile, profileId: dbProfile.id, mindCard });
     }
 
     if (mode === "screenshots") {

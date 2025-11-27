@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import type { Profile, SourceMode } from "@/types/profile";
 import { ProfileFeedback } from "@/components/ProfileFeedback";
+import type { MindCard } from "@/types/mindCard";
+import { MindCardView } from "@/components/MindCardView";
 
 type Mode = "link" | "text" | "screenshots";
 type ProfileSource = SourceMode;
@@ -26,6 +28,7 @@ export default function AnalyzePage() {
   const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [mindCard, setMindCard] = useState<MindCard | null>(null);
   const [profileSource, setProfileSource] = useState<ProfileSource | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [shareLink, setShareLink] = useState("");
@@ -56,6 +59,7 @@ export default function AnalyzePage() {
     setInputError(null);
     setApiError(null);
     setCopied(false);
+    setMindCard(null);
 
     const trimmedText = pastedText.trim();
     const trimmedUrl = shareUrl.trim();
@@ -107,7 +111,12 @@ export default function AnalyzePage() {
 
       const response = await request();
 
-      const data = (await response.json()) as { profile?: Profile; profileId?: string; error?: string };
+      const data = (await response.json()) as {
+        profile?: Profile;
+        profileId?: string;
+        mindCard?: MindCard;
+        error?: string;
+      };
 
       if (!response.ok || !data?.profile) {
         if (mode === "link" && data?.error === "invalid_url_or_content") {
@@ -124,6 +133,7 @@ export default function AnalyzePage() {
 
       setProfile(data.profile);
       setProfileId(data.profileId ?? null);
+      setMindCard(data.mindCard ?? null);
       setProfileSource(
         (data.profile.sourceMode as ProfileSource | undefined) ??
           (mode === "screenshots" ? "screenshots" : mode === "link" ? "url" : "text"),
@@ -287,6 +297,10 @@ export default function AnalyzePage() {
             </div>
           )}
         </form>
+
+        {mindCard && (
+          <MindCardView mindCard={mindCard} />
+        )}
 
         {profile && (
           <div className="glass card-border space-y-6 rounded-3xl p-6 sm:p-10">

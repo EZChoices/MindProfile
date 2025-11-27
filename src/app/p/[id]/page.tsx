@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/types/profile";
 import { ProfileFeedback } from "@/components/ProfileFeedback";
+import type { MindCard } from "@/types/mindCard";
+import { MindCardView } from "@/components/MindCardView";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,7 @@ type RecordSelection = {
   inputCharCount: number;
   resonance: string | null;
   feedbackText: string | null;
+  mindCard: unknown;
 };
 
 const parseArray = (value: unknown) => {
@@ -50,6 +53,19 @@ const toProfile = (record: RecordSelection) => {
   };
 
   return profile;
+};
+
+const parseMindCard = (value: unknown): MindCard | null => {
+  if (!value) return null;
+  if (typeof value === "object") return value as MindCard;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as MindCard;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 };
 
 const NotFound = () => (
@@ -106,6 +122,7 @@ export default async function ProfilePage({
         inputCharCount: true,
         resonance: true,
         feedbackText: true,
+        mindCard: true,
       },
     })) as RecordSelection | null;
   } catch (error) {
@@ -119,6 +136,7 @@ export default async function ProfilePage({
   }
 
   const profile = toProfile(record);
+  const mindCard = parseMindCard(record.mindCard);
   const confidenceLabel = `${profile.confidence.charAt(0).toUpperCase()}${profile.confidence.slice(
     1,
   )}`;
@@ -162,10 +180,12 @@ export default async function ProfilePage({
             Read-only view generated from a single conversation sample. Not a psychological assessment.
           </p>
           <p className="muted text-xs text-slate-200">
-            Source: {sourceFriendly} · Confidence: {confidenceLabel}
-            {lengthLabel ? ` · Length: ${lengthLabel}` : ""} · Generated: {createdDisplay}
+            Source: {sourceFriendly} • Confidence: {confidenceLabel}
+            {lengthLabel ? ` • Length: ${lengthLabel}` : ""} • Generated: {createdDisplay}
           </p>
         </div>
+
+        {mindCard && <MindCardView mindCard={mindCard} />}
 
         <div className="glass card-border space-y-6 rounded-3xl p-6 sm:p-10">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -242,3 +262,4 @@ export default async function ProfilePage({
     </main>
   );
 }
+
