@@ -83,6 +83,7 @@ export default async function AdminProfilesPage({
                 <th className="px-4 py-3">Resonance</th>
                 <th className="px-4 py-3">Feedback?</th>
                 <th className="px-4 py-3">Link</th>
+                <th className="px-4 py-3">Raw</th>
               </tr>
             </thead>
             <tbody>
@@ -107,11 +108,21 @@ export default async function AdminProfilesPage({
                       View
                     </Link>
                   </td>
+                  <td className="px-4 py-3">
+                    <a
+                      href={`/api/profile/${profile.id}`}
+                      className="text-emerald-200 underline"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Raw
+                    </a>
+                  </td>
                 </tr>
               ))}
               {profiles.length === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-slate-400" colSpan={9}>
+                  <td className="px-4 py-4 text-slate-400" colSpan={10}>
                     No profiles yet.
                   </td>
                 </tr>
