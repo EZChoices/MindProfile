@@ -1,12 +1,8 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { generateProfileSummary } from "@/lib/profiler";
-
-const toConfidenceLabel = (value: number) => {
-  if (value >= 0.66) return "high" as const;
-  if (value < 0.33) return "low" as const;
-  return "medium" as const;
-};
+import { analyzeConversation } from "@/lib/analyzeConversation";
+import { normalizeTextInput } from "@/lib/normalizeInput";
+import type { Profile } from "@/types/profile";
 
 export async function POST(request: Request) {
   try {
@@ -20,32 +16,39 @@ export async function POST(request: Request) {
       );
     }
 
-    const trimmed = text.trim();
-    const { sanitizedText, summary } = await generateProfileSummary(trimmed, "text");
-
-    const confidence = toConfidenceLabel(summary.confidence);
+    const normalized = normalizeTextInput(text.trim());
+    const analysis = await analyzeConversation({
+      normalizedText: normalized.normalizedText,
+      inputCharCount: normalized.inputCharCount,
+      sourceMode: "text",
+    });
 
     const dbProfile = await prisma.profile.create({
       data: {
-        sourceMode: "text",
-        confidence,
-        thinkingStyle: summary.thinkingStyle,
-        communicationStyle: summary.communicationStyle,
-        strengthsJson: JSON.stringify(summary.strengths ?? []),
-        blindSpotsJson: JSON.stringify(summary.blindSpots ?? []),
-        suggestedJson: JSON.stringify(summary.recommendations ?? []),
-        rawText: sanitizedText,
+        sourceMode: normalized.sourceMode,
+        confidence: analysis.profile.confidence,
+        thinkingStyle: analysis.profile.thinkingStyle,
+        communicationStyle: analysis.profile.communicationStyle,
+        strengthsJson: analysis.profile.strengths,
+        blindSpotsJson: analysis.profile.blindSpots,
+        suggestedJson: analysis.profile.suggestedWorkflows,
+        rawText: normalized.normalizedText,
+        model: analysis.modelUsed,
+        promptVersion: analysis.promptVersion,
+        inputCharCount: normalized.inputCharCount,
+        inputSourceHost: normalized.inputSourceHost,
+        promptTokens: analysis.promptTokens,
+        completionTokens: analysis.completionTokens,
       },
     });
 
-    const responseProfile = {
+    const responseProfile: Profile = {
+      ...analysis.profile,
       id: dbProfile.id,
-      thinkingStyle: summary.thinkingStyle,
-      communicationStyle: summary.communicationStyle,
-      strengths: summary.strengths ?? [],
-      blindSpots: summary.blindSpots ?? [],
-      suggestedWorkflows: summary.recommendations ?? [],
-      confidence,
+      sourceMode: normalized.sourceMode,
+      inputCharCount: normalized.inputCharCount,
+      model: analysis.modelUsed,
+      promptVersion: analysis.promptVersion,
     };
 
     return NextResponse.json({ profileId: dbProfile.id, profile: responseProfile });

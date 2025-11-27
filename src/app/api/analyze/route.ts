@@ -1,14 +1,9 @@
 import { NextResponse } from "next/server";
 import { load } from "cheerio";
-import OpenAI from "openai";
 import { prisma } from "@/lib/prisma";
-import type { Profile } from "@/types/profile";
-
-type IngestionType = "text" | "url";
-
-const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+import { analyzeConversation } from "@/lib/analyzeConversation";
+import { normalizeTextInput, normalizeUrlInput } from "@/lib/normalizeInput";
+import type { Profile, SourceMode } from "@/types/profile";
 
 const allowedHosts = [
   "chatgpt.com",
@@ -18,22 +13,6 @@ const allowedHosts = [
   "g.co",
   "ai.google.com",
 ];
-
-const anonymizeText = (text: string): string => {
-  let sanitized = text.replace(/\b\S+@\S+\.\S+\b/g, "[EMAIL]");
-  sanitized = sanitized.replace(/https?:\/\/\S+/g, "[URL]");
-  sanitized = sanitized.replace(/\d{7,}/g, "[PHONE]");
-  sanitized = sanitized.replace(/\n{3,}/g, "\n\n");
-  sanitized = sanitized.replace(/\s{2,}/g, " ");
-  return sanitized.trim();
-};
-
-const normalizeConfidence = (value: string | undefined): Profile["confidence"] => {
-  if (value === "low" || value === "medium" || value === "high") {
-    return value;
-  }
-  return "medium";
-};
 
 const extractTextFromHtml = (html: string): string => {
   const $ = load(html);
@@ -49,87 +28,10 @@ const isAllowedUrl = (url: URL) => {
   return protocolOk && allowedHosts.some((host) => url.hostname.toLowerCase().endsWith(host));
 };
 
-const generateProfile = async (anonymizedText: string): Promise<Profile> => {
-  const response = await client.chat.completions.create({
-    model: "gpt-4.1-mini",
-    response_format: { type: "json_object" },
-    messages: [
-      {
-        role: "system",
-        content: `
-You are a psychologist and productivity coach.
-Given an anonymized conversation between a human and an AI assistant,
-infer a short cognitive + communication profile of the human.
-
-Respond ONLY with a JSON object matching this TypeScript type:
-
-interface Profile {
-  id: string;
-  thinkingStyle: string;
-  communicationStyle: string;
-  strengths: string[];
-  blindSpots: string[];
-  suggestedWorkflows: string[];
-  confidence: "low" | "medium" | "high";
-}
-          `.trim(),
-      },
-      {
-        role: "user",
-        content: `
-Here is the anonymized conversation:
-
-${anonymizedText}
-          `.trim(),
-      },
-    ],
-  });
-
-  const content = response.choices[0]?.message?.content;
-  if (!content) {
-    throw new Error("Empty response content from OpenAI");
-  }
-
-  const parsed = JSON.parse(content) as Partial<Profile>;
-
-  return {
-    id: parsed.id || crypto.randomUUID(),
-    thinkingStyle: parsed.thinkingStyle || "",
-    communicationStyle: parsed.communicationStyle || "",
-    strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
-    blindSpots: Array.isArray(parsed.blindSpots) ? parsed.blindSpots : [],
-    suggestedWorkflows: Array.isArray(parsed.suggestedWorkflows) ? parsed.suggestedWorkflows : [],
-    confidence: normalizeConfidence(parsed.confidence),
-  };
-};
-
-const persistProfile = async (input: {
-  ingestionType: IngestionType;
-  sourceMeta: string;
-  anonymizedText: string;
-  profile: Profile;
-}) => {
-  const dbProfile = await prisma.profile.create({
-    data: {
-      sourceMode: input.ingestionType,
-      confidence: input.profile.confidence,
-      thinkingStyle: input.profile.thinkingStyle,
-      communicationStyle: input.profile.communicationStyle,
-      strengthsJson: JSON.stringify(input.profile.strengths),
-      blindSpotsJson: JSON.stringify(input.profile.blindSpots),
-      suggestedJson: JSON.stringify(input.profile.suggestedWorkflows),
-      rawText: input.anonymizedText,
-    },
-  });
-
-  const profileWithId: Profile = { ...input.profile, id: dbProfile.id };
-  return { profileWithId, profileId: dbProfile.id };
-};
-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const mode = body?.mode as string | undefined;
+    const mode = body?.mode as SourceMode | undefined;
 
     if (!process.env.OPENAI_API_KEY) {
       console.error("OPENAI_API_KEY is missing");
@@ -143,19 +45,46 @@ export async function POST(request: Request) {
       if (!text || text.length < 50) {
         return NextResponse.json(
           { error: "invalid_input", message: "Provide text mode with at least 50 characters." },
-          { status: 400 },
+        { status: 400 },
         );
       }
 
-      const anonymizedText = anonymizeText(text);
-      const profile = await generateProfile(anonymizedText);
-      const { profileWithId, profileId } = await persistProfile({
-        ingestionType: "text",
-        sourceMeta: "text",
-        anonymizedText,
-        profile,
+      const normalized = normalizeTextInput(text);
+      const analysis = await analyzeConversation({
+        normalizedText: normalized.normalizedText,
+        inputCharCount: normalized.inputCharCount,
+        sourceMode: "text",
       });
-      return NextResponse.json({ profile: profileWithId, profileId });
+
+      const dbProfile = await prisma.profile.create({
+        data: {
+          sourceMode: normalized.sourceMode,
+          confidence: analysis.profile.confidence,
+          thinkingStyle: analysis.profile.thinkingStyle,
+          communicationStyle: analysis.profile.communicationStyle,
+          strengthsJson: analysis.profile.strengths,
+          blindSpotsJson: analysis.profile.blindSpots,
+          suggestedJson: analysis.profile.suggestedWorkflows,
+          rawText: normalized.normalizedText,
+          model: analysis.modelUsed,
+          promptVersion: analysis.promptVersion,
+          inputCharCount: normalized.inputCharCount,
+          inputSourceHost: normalized.inputSourceHost,
+          promptTokens: analysis.promptTokens,
+          completionTokens: analysis.completionTokens,
+        },
+      });
+
+      const profile: Profile = {
+        ...analysis.profile,
+        id: dbProfile.id,
+        sourceMode: normalized.sourceMode,
+        inputCharCount: normalized.inputCharCount,
+        model: analysis.modelUsed,
+        promptVersion: analysis.promptVersion,
+      };
+
+      return NextResponse.json({ profile, profileId: dbProfile.id });
     }
 
     if (mode === "url") {
@@ -189,15 +118,47 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
       }
 
-      const anonymizedText = anonymizeText(extracted);
-      const profile = await generateProfile(anonymizedText);
-      const { profileWithId, profileId } = await persistProfile({
-        ingestionType: "url",
-        sourceMeta: parsedUrl.hostname,
-        anonymizedText,
-        profile,
+      const normalized = normalizeUrlInput(extracted, parsedUrl.toString());
+      const analysis = await analyzeConversation({
+        normalizedText: normalized.normalizedText,
+        inputCharCount: normalized.inputCharCount,
+        sourceMode: "url",
       });
-      return NextResponse.json({ profile: profileWithId, profileId });
+
+      const dbProfile = await prisma.profile.create({
+        data: {
+          sourceMode: normalized.sourceMode,
+          confidence: analysis.profile.confidence,
+          thinkingStyle: analysis.profile.thinkingStyle,
+          communicationStyle: analysis.profile.communicationStyle,
+          strengthsJson: analysis.profile.strengths,
+          blindSpotsJson: analysis.profile.blindSpots,
+          suggestedJson: analysis.profile.suggestedWorkflows,
+          rawText: normalized.normalizedText,
+          model: analysis.modelUsed,
+          promptVersion: analysis.promptVersion,
+          inputCharCount: normalized.inputCharCount,
+          inputSourceHost: normalized.inputSourceHost,
+          promptTokens: analysis.promptTokens,
+          completionTokens: analysis.completionTokens,
+        },
+      });
+
+      const profile: Profile = {
+        ...analysis.profile,
+        id: dbProfile.id,
+        sourceMode: normalized.sourceMode,
+        inputCharCount: normalized.inputCharCount,
+        model: analysis.modelUsed,
+        promptVersion: analysis.promptVersion,
+      };
+
+      return NextResponse.json({ profile, profileId: dbProfile.id });
+    }
+
+    if (mode === "screenshots") {
+      // This route expects FormData in a separate endpoint; keep here for completeness.
+      return NextResponse.json({ error: "invalid_input" }, { status: 400 });
     }
 
     return NextResponse.json({ error: "invalid_input" }, { status: 400 });

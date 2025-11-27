@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Profile } from "@/types/profile";
+import type { Profile, SourceMode } from "@/types/profile";
 
-type Mode = "link" | "text" | "screenshot";
-type ProfileSource = "text" | "link" | "screenshots";
+type Mode = "link" | "text" | "screenshots";
+type ProfileSource = SourceMode;
 
 const MIN_TEXT_LENGTH = 50;
 
@@ -15,7 +15,7 @@ User: We use Slack + Jira. Give me a process map and scripts for the handoffs. K
 const modeCopy: Record<Mode, string> = {
   link: "Paste a public ChatGPT/Claude/Gemini share link.",
   text: "Paste 1-3 great chats or transcripts. More detail = better profile.",
-  screenshot: "Upload up to 5 screenshots of a chat. Works from your phone.",
+  screenshots: "Upload up to 5 screenshots of a chat. Works from your phone.",
 };
 
 export default function AnalyzePage() {
@@ -66,10 +66,10 @@ export default function AnalyzePage() {
       }
     } else if (mode === "link") {
       if (!trimmedUrl) {
-        setInputError("Paste a share link to analyze.");
+        setInputError("Paste a valid public share link.");
         return;
       }
-    } else if (mode === "screenshot") {
+    } else if (mode === "screenshots") {
       if (screenshotFiles.length === 0) {
         setInputError("Upload at least one screenshot to analyze.");
         return;
@@ -107,7 +107,7 @@ export default function AnalyzePage() {
       if (!response.ok || !data?.profile) {
         if (mode === "link" && data?.error === "invalid_url_or_content") {
           setApiError("We couldn't read that link. Try a different one or paste the conversation text instead.");
-        } else if (mode === "screenshot") {
+        } else if (mode === "screenshots") {
           setApiError("We couldn't read those screenshots. Try fewer images or a clearer chat.");
         } else if (mode === "link") {
           setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");
@@ -119,7 +119,10 @@ export default function AnalyzePage() {
 
       setProfile(data.profile);
       setProfileId(data.profileId ?? null);
-      setProfileSource(mode === "screenshot" ? "screenshots" : mode);
+      setProfileSource(
+        (data.profile.sourceMode as ProfileSource | undefined) ??
+          (mode === "screenshots" ? "screenshots" : mode === "link" ? "url" : "text"),
+      );
     } catch {
       setApiError("We couldn't analyze that conversation. Try a different one or shorten it.");
     } finally {
@@ -152,7 +155,7 @@ export default function AnalyzePage() {
           className="glass card-border space-y-6 rounded-3xl p-6 sm:p-10"
         >
           <div className="grid gap-3 sm:grid-cols-3">
-            {(["link", "text", "screenshot"] as Mode[]).map((option) => {
+            {(["link", "text", "screenshots"] as Mode[]).map((option) => {
               const active = mode === option;
               return (
                 <button
@@ -172,7 +175,7 @@ export default function AnalyzePage() {
                   <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                     {option === "link" && "Share URL"}
                     {option === "text" && "Paste text"}
-                    {option === "screenshot" && "Screenshots"}
+                    {option === "screenshots" && "Screenshots"}
                   </div>
                   <div className="mt-1 font-semibold capitalize text-white">{option}</div>
                   <p className="muted mt-2 text-xs leading-relaxed">{modeCopy[option]}</p>
@@ -185,7 +188,7 @@ export default function AnalyzePage() {
             <label className="text-sm font-semibold text-white">
               {mode === "link" && "Chat share link"}
               {mode === "text" && "Paste conversation"}
-              {mode === "screenshot" && "Upload screenshots"}
+              {mode === "screenshots" && "Upload screenshots"}
             </label>
 
             {mode === "link" && (
@@ -198,7 +201,9 @@ export default function AnalyzePage() {
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-emerald-300/60"
                 />
                 <div className="flex items-start justify-between gap-3">
-                  <p className="text-xs text-slate-200">Paste a public ChatGPT/Claude/Gemini share link.</p>
+                  <p className="text-xs text-slate-200">
+                    Paste a public ChatGPT/Claude/Gemini share link. We only analyze what you paste here.
+                  </p>
                   {inputError && <span className="text-xs text-red-200">{inputError}</span>}
                 </div>
               </div>
@@ -223,10 +228,13 @@ export default function AnalyzePage() {
                   </button>
                   {inputError && <span className="text-xs text-red-200">{inputError}</span>}
                 </div>
+                <p className="text-xs text-slate-200">
+                  We only analyze what you paste here. Sensitive details are stripped in-pipeline.
+                </p>
               </div>
             )}
 
-            {mode === "screenshot" && (
+            {mode === "screenshots" && (
               <div className="space-y-3">
                 <label className="dropzone flex min-h-[160px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-200 hover:border-emerald-300/60">
                   <input
@@ -286,7 +294,7 @@ export default function AnalyzePage() {
                 )}
               </div>
               <span className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-4 py-2 text-xs text-emerald-50">
-                {profileSource === "link" && "Generated from share URL"}
+                {profileSource === "url" && "Generated from share URL"}
                 {profileSource === "text" && "Generated from pasted text"}
                 {profileSource === "screenshots" && "Generated from screenshots"}
               </span>

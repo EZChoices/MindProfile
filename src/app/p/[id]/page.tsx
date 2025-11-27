@@ -9,18 +9,26 @@ type RecordSelection = {
   confidence: string;
   thinkingStyle: string;
   communicationStyle: string;
-  strengthsJson: string;
-  blindSpotsJson: string;
-  suggestedJson: string;
+  strengthsJson: unknown;
+  blindSpotsJson: unknown;
+  suggestedJson: unknown;
+  createdAt: Date;
+  inputCharCount: number;
 };
 
-const parseArray = (value: string) => {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed) ? (parsed as string[]) : [];
-  } catch {
-    return [];
+const parseArray = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item));
   }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? (parsed as string[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 };
 
 const toProfile = (record: RecordSelection) => {
@@ -35,6 +43,9 @@ const toProfile = (record: RecordSelection) => {
     strengths: parseArray(record.strengthsJson),
     blindSpots: parseArray(record.blindSpotsJson),
     suggestedWorkflows: parseArray(record.suggestedJson),
+    sourceMode: record.sourceMode as Profile["sourceMode"],
+    inputCharCount: record.inputCharCount,
+    createdAt: record.createdAt.toISOString(),
   };
 
   return profile;
@@ -45,6 +56,14 @@ const NotFound = () => (
     <div className="rounded-3xl border border-white/10 bg-white/5 px-6 py-10 text-center text-slate-200">
       <h1 className="font-[var(--font-display)] text-2xl text-white">Profile not found</h1>
       <p className="muted mt-2 text-sm">This link may be expired or the profile was deleted.</p>
+      <div className="mt-4">
+        <a
+          href="/analyze"
+          className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-4 py-2 text-xs font-semibold text-emerald-50 hover:border-emerald-300/80 hover:bg-emerald-300/20"
+        >
+          Create your own MindProfile
+        </a>
+      </div>
     </div>
   </main>
 );
@@ -82,6 +101,8 @@ export default async function ProfilePage({
         blindSpotsJson: true,
         suggestedJson: true,
         sourceMode: true,
+        createdAt: true,
+        inputCharCount: true,
       },
     })) as RecordSelection | null;
   } catch (error) {
@@ -106,6 +127,24 @@ export default async function ProfilePage({
         ? "Generated from screenshots"
         : "Generated from pasted text";
 
+  const createdDisplay = new Date(record.createdAt).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const lengthLabel =
+    typeof profile.inputCharCount === "number" && profile.inputCharCount > 0
+      ? `~${profile.inputCharCount} characters`
+      : null;
+
+  const sourceFriendly =
+    record.sourceMode === "url"
+      ? "Share URL"
+      : record.sourceMode === "screenshots"
+        ? "Screenshots"
+        : "Pasted text";
+
   return (
     <main className="beam gridlines min-h-screen px-6 py-10 sm:px-10">
       <div className="mx-auto flex max-w-5xl flex-col gap-10">
@@ -117,7 +156,11 @@ export default async function ProfilePage({
             Your MindProfile snapshot
           </h1>
           <p className="muted text-base leading-relaxed text-slate-100">
-            Read-only view generated from a recent conversation sample.
+            Read-only view generated from a single conversation sample. Not a psychological assessment.
+          </p>
+          <p className="muted text-xs text-slate-200">
+            Source: {sourceFriendly} · Confidence: {confidenceLabel}
+            {lengthLabel ? ` · Length: ${lengthLabel}` : ""} · Generated: {createdDisplay}
           </p>
         </div>
 
@@ -177,6 +220,14 @@ export default async function ProfilePage({
               </ul>
             </div>
           </div>
+        </div>
+        <div className="flex items-center justify-center">
+          <a
+            href="/analyze"
+            className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-6 py-3 text-sm font-semibold text-emerald-50 hover:border-emerald-300/80 hover:bg-emerald-300/20"
+          >
+            Create your own MindProfile
+          </a>
         </div>
       </div>
     </main>

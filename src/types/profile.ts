@@ -1,3 +1,5 @@
+export type SourceMode = "text" | "url" | "screenshots";
+
 export interface Profile {
   id: string;
   thinkingStyle: string;
@@ -6,4 +8,11 @@ export interface Profile {
   blindSpots: string[];
   suggestedWorkflows: string[];
   confidence: "low" | "medium" | "high";
+  // Optional meta fields returned by the backend
+  sourceMode?: SourceMode;
+  inputCharCount?: number;
+  model?: string;
+  promptVersion?: string;
+  createdAt?: string;
+  inputSourceHost?: string | null;
 }

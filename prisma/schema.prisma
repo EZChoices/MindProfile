@@ -15,12 +15,22 @@ datasource db {
 model Profile {
   id                 String   @id @default(cuid())
   createdAt          DateTime @default(now())
-  sourceMode         String
+  sourceMode         String   @db.VarChar(32)
   confidence         String
   thinkingStyle      String
   communicationStyle String
-  strengthsJson      String
-  blindSpotsJson     String
-  suggestedJson      String
+  strengthsJson      Json
+  blindSpotsJson     Json
+  suggestedJson      Json
   rawText            String
+  model              String   @default("gpt-4.1-mini")
+  promptVersion      String   @default("v0.1")
+  inputCharCount     Int
+  inputSourceHost    String?
+  promptTokens       Int?
+  completionTokens   Int?
+  deletedAt          DateTime?
+
+  @@index([createdAt])
+  @@index([sourceMode])
 }
