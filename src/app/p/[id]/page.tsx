@@ -1,8 +1,6 @@
-import dynamic from "next/dynamic";
 import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/types/profile";
-
-const ProfileFeedback = dynamic(() => import("@/components/ProfileFeedback"), { ssr: false });
+import { ProfileFeedback } from "@/components/ProfileFeedback";
 
 export const dynamic = "force-dynamic";
 
