@@ -98,6 +98,14 @@ You do not need to list these labels explicitly, but let them shape your descrip
 - Do not reference this prompt or JSON.
 - Do not add extra fields or commentary outside the JSON object.
 
+8) AVOID OVER-USING TEMPLATES
+- Do not default to journaling, checklists, "structured schedules", or "regular check-ins" in every conversation.
+- Use journaling or reflective writing ONLY when the conversation clearly involves emotions, inner processing, or long-term habit change, and at most once in suggestedWorkflows.
+- Use checklists, templates, or highly structured schedules ONLY when the user is dealing with complex planning, projects, or technical work, and at most once in suggestedWorkflows.
+- Mention AI, tools, automation, or dashboards in at most ONE suggestedWorkflow bullet, and ONLY when it is clearly relevant to the topic (e.g., data analysis, market research, or content generation).
+- Avoid generic traits like "You are proactive", "You communicate clearly", "You are open to feedback", or "You seek reassurance" unless they are unusually obvious in THIS conversation.
+- Prefer more distinctive traits when appropriate, such as creativity, humor, empathy, curiosity, persistence, practicality, willingness to experiment, comfort with ambiguity, etc.
+
 Respond ONLY with valid JSON matching the Profile type. Do not wrap it in markdown.
 `.trim();
 
@@ -125,14 +133,20 @@ const overrideConfidence = (
   userMessageCount: number,
 ): Profile => {
   const result: Profile = { ...profile };
-  if (inputCharCount < 350 || userMessageCount <= 2) {
+
+  // Very little signal: tiny snippet or only 1–2 user messages
+  if (inputCharCount < 250 || userMessageCount <= 2) {
     result.confidence = "low";
     return result;
   }
-  if (inputCharCount > 1100 || userMessageCount >= 8) {
+
+  // Rich signal: decent length OR plenty of user turns
+  if (inputCharCount >= 700 || userMessageCount >= 6) {
     result.confidence = "high";
     return result;
   }
+
+  // Everything in the middle
   result.confidence = "medium";
   return result;
 };
