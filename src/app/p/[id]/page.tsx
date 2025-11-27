@@ -1,5 +1,8 @@
+import dynamic from "next/dynamic";
 import { prisma } from "@/lib/prisma";
 import type { Profile } from "@/types/profile";
+
+const ProfileFeedback = dynamic(() => import("@/components/ProfileFeedback"), { ssr: false });
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +22,7 @@ type RecordSelection = {
 };
 
 const parseArray = (value: unknown) => {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item));
-  }
+  if (Array.isArray(value)) return value.map((item) => String(item));
   if (typeof value === "string") {
     try {
       const parsed = JSON.parse(value) as unknown;
@@ -89,8 +90,8 @@ export default async function ProfilePage({
     });
     return <NotFound />;
   }
-  let record: RecordSelection | null = null;
 
+  let record: RecordSelection | null = null;
   try {
     record = (await prisma.profile.findUnique({
       where: { id },
@@ -243,4 +244,3 @@ export default async function ProfilePage({
     </main>
   );
 }
-import { ProfileFeedback } from "@/components/ProfileFeedback";
