@@ -74,6 +74,10 @@ export default function AnalyzePage() {
         setInputError("Upload at least one screenshot to analyze.");
         return;
       }
+      if (screenshotFiles.length > 5) {
+        setInputError("Limit to 5 screenshots for now.");
+        return;
+      }
     } else {
       setApiError("Something went wrong. Please try again.");
       return;
@@ -154,7 +158,7 @@ export default function AnalyzePage() {
           onSubmit={handleSubmit}
           className="glass card-border space-y-6 rounded-3xl p-6 sm:p-10"
         >
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="inline-flex w-full overflow-hidden rounded-full border border-white/10 bg-white/5 text-sm">
             {(["link", "text", "screenshots"] as Mode[]).map((option) => {
               const active = mode === option;
               return (
@@ -166,23 +170,20 @@ export default function AnalyzePage() {
                     setInputError(null);
                     setApiError(null);
                   }}
-                  className={`rounded-2xl border px-4 py-3 text-left text-sm transition ${
+                  className={`flex-1 px-4 py-3 transition ${
                     active
-                      ? "border-emerald-300/70 bg-emerald-300/15 text-white"
-                      : "border-white/10 bg-white/5 text-slate-200 hover:border-white/30"
+                      ? "bg-emerald-300/20 text-white"
+                      : "text-slate-200 hover:bg-white/5"
                   }`}
                 >
-                  <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                    {option === "link" && "Share URL"}
-                    {option === "text" && "Paste text"}
-                    {option === "screenshots" && "Screenshots"}
-                  </div>
-                  <div className="mt-1 font-semibold capitalize text-white">{option}</div>
-                  <p className="muted mt-2 text-xs leading-relaxed">{modeCopy[option]}</p>
+                  {option === "link" && "Share link"}
+                  {option === "text" && "Paste text"}
+                  {option === "screenshots" && "Screenshots"}
                 </button>
               );
             })}
           </div>
+          <p className="muted text-xs text-slate-200">{modeCopy[mode]}</p>
 
           <div className="space-y-3">
             <label className="text-sm font-semibold text-white">
