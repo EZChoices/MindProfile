@@ -1,7 +1,10 @@
+"use client";
+
 import type { MindCard } from "@/types/mindCard";
 
 interface MindCardViewProps {
   mindCard: MindCard;
+  impressionLabel?: string;
 }
 
 interface ScoreBarProps {
@@ -26,7 +29,7 @@ const ScoreBar = ({ label, value }: ScoreBarProps) => {
   );
 };
 
-export const MindCardView = ({ mindCard }: MindCardViewProps) => {
+export const MindCardView = ({ mindCard, impressionLabel }: MindCardViewProps) => {
   const { archetypeName, archetypeTagline, brainScores, bigFive, mbti, loveLanguage, roles, brainIndex } = mindCard;
 
   return (
@@ -38,7 +41,7 @@ export const MindCardView = ({ mindCard }: MindCardViewProps) => {
           <p className="muted mt-1 text-sm text-slate-100">{archetypeTagline}</p>
         </div>
         <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs text-emerald-100">
-          AI impression from this chat
+          {impressionLabel || "AI impression from this chat"}
         </div>
       </div>
 

@@ -15,6 +15,7 @@ datasource db {
 model Profile {
   id                 String   @id @default(cuid())
   createdAt          DateTime @default(now())
+  clientId           String?  @db.VarChar(64)
   sourceMode         String   @db.VarChar(32)
   confidence         String
   thinkingStyle      String
@@ -35,6 +36,7 @@ model Profile {
   feedbackAt         DateTime?
   mindCard           Json?
 
+  @@index([clientId, createdAt])
   @@index([createdAt])
   @@index([sourceMode])
 }

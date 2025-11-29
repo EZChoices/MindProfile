@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Profile, SourceMode } from "@/types/profile";
+import type { Profile, SourceMode, Tier } from "@/types/profile";
 import { ProfileFeedback } from "@/components/ProfileFeedback";
 import type { MindCard } from "@/types/mindCard";
 import { MindCardView } from "@/components/MindCardView";
+import { getOrCreateClientId } from "@/lib/clientId";
 
 type Mode = "link" | "text" | "screenshots";
 type ProfileSource = SourceMode;
@@ -35,6 +36,8 @@ export default function AnalyzePage() {
   const [copied, setCopied] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [submissionCount, setSubmissionCount] = useState<number | null>(null);
+  const [tier, setTier] = useState<Tier>("first_impression");
 
   const handleScreenshotSelect = (files: FileList | null) => {
     const next = Array.from(files ?? []).slice(0, 5);
@@ -63,6 +66,7 @@ export default function AnalyzePage() {
 
     const trimmedText = pastedText.trim();
     const trimmedUrl = shareUrl.trim();
+    const clientId = getOrCreateClientId();
 
     if (mode === "text") {
       if (trimmedText.length < MIN_TEXT_LENGTH) {
@@ -99,13 +103,14 @@ export default function AnalyzePage() {
             headers: { "Content-Type": "application/json" },
             body:
               mode === "text"
-                ? JSON.stringify({ mode: "text", text: trimmedText })
-                : JSON.stringify({ mode: "url", url: trimmedUrl }),
+                ? JSON.stringify({ mode: "text", text: trimmedText, clientId })
+                : JSON.stringify({ mode: "url", url: trimmedUrl, clientId }),
           });
         }
 
         const formData = new FormData();
         screenshotFiles.forEach((file) => formData.append("images", file));
+        formData.append("clientId", clientId);
         return fetch("/api/analyze-screenshots", { method: "POST", body: formData });
       };
 
@@ -115,6 +120,8 @@ export default function AnalyzePage() {
         profile?: Profile;
         profileId?: string;
         mindCard?: MindCard;
+        submissionCount?: number;
+        tier?: Tier;
         error?: string;
       };
 
@@ -134,6 +141,8 @@ export default function AnalyzePage() {
       setProfile(data.profile);
       setProfileId(data.profileId ?? null);
       setMindCard(data.mindCard ?? null);
+      setSubmissionCount(data.submissionCount ?? null);
+      setTier(data.tier ?? "first_impression");
       setProfileSource(
         (data.profile.sourceMode as ProfileSource | undefined) ??
           (mode === "screenshots" ? "screenshots" : mode === "link" ? "url" : "text"),
@@ -299,7 +308,44 @@ export default function AnalyzePage() {
         </form>
 
         {mindCard && (
-          <MindCardView mindCard={mindCard} />
+          <div className="space-y-2">
+            <div className="text-xs text-slate-200">
+              {tier === "first_impression" && (
+                <>
+                  AI Mind Report — first impression from this chat.
+                  <br />
+                  {submissionCount ? `Based on ${submissionCount} conversation${submissionCount > 1 ? "s" : ""}` : "Based on 1 conversation"}
+                  {profile?.confidence ? ` · Confidence: ${profile.confidence}` : ""}
+                </>
+              )}
+              {tier === "building_profile" && (
+                <>
+                  AI Mind Report — you’ve added {submissionCount ?? 2} chats.
+                  <br />
+                  Add {Math.max(0, 5 - (submissionCount ?? 2))} more to unlock your Full MindProfile.
+                </>
+              )}
+              {tier === "full_profile" && (
+                <>
+                  AI Mind Report — based on {submissionCount ?? 5} chats from this browser.
+                  <br />
+                  Full MindProfile unlocked{profile?.confidence ? ` · Confidence: ${profile.confidence}` : ""}.
+                </>
+              )}
+            </div>
+            {tier === "building_profile" && (
+              <div className="h-1 w-full rounded-full bg-white/10">
+                <div
+                  className="h-1 rounded-full bg-emerald-300"
+                  style={{ width: `${Math.min(5, submissionCount ?? 2) / 5 * 100}%` }}
+                />
+              </div>
+            )}
+            <MindCardView
+              mindCard={mindCard}
+              impressionLabel={tier === "full_profile" ? "AI impression from your chats" : "AI impression from this chat"}
+            />
+          </div>
         )}
 
         {profile && (

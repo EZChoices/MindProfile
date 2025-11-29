@@ -20,3 +20,5 @@ export interface Profile {
   feedbackAt?: string | null;
   mindCard?: import("./mindCard").MindCard | null;
 }
+
+export type Tier = "first_impression" | "building_profile" | "full_profile";

@@ -11,6 +11,8 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const text = body?.text as string | undefined;
+    const clientId =
+      typeof body?.clientId === "string" && body.clientId.trim().length > 0 ? body.clientId.trim() : null;
 
     if (!text || text.trim().length < 50) {
       return NextResponse.json(
@@ -42,6 +44,7 @@ export async function POST(request: Request) {
 
     const dbProfile = await prisma.profile.create({
       data: {
+        clientId,
         sourceMode: normalized.sourceMode,
         confidence: analysis.profile.confidence,
         thinkingStyle: analysis.profile.thinkingStyle,
@@ -60,6 +63,13 @@ export async function POST(request: Request) {
       },
     });
 
+    let submissionCount = 1;
+    if (clientId) {
+      submissionCount = await prisma.profile.count({ where: { clientId } });
+    }
+    const tier: "first_impression" | "building_profile" | "full_profile" =
+      submissionCount <= 1 ? "first_impression" : submissionCount < 5 ? "building_profile" : "full_profile";
+
     const responseProfile: Profile = {
       ...analysis.profile,
       id: dbProfile.id,
@@ -69,7 +79,13 @@ export async function POST(request: Request) {
       promptVersion: analysis.promptVersion,
     };
 
-    return NextResponse.json({ profileId: dbProfile.id, profile: responseProfile, mindCard });
+    return NextResponse.json({
+      profileId: dbProfile.id,
+      profile: responseProfile,
+      mindCard,
+      submissionCount,
+      tier,
+    });
   } catch (error) {
     console.error("Text ingest failed", error);
     return NextResponse.json(

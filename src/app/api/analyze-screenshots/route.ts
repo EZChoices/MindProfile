@@ -16,6 +16,9 @@ export async function POST(request: Request) {
     }
 
     const formData = await request.formData();
+    const clientIdRaw = formData.get("clientId");
+    const clientId =
+      typeof clientIdRaw === "string" && clientIdRaw.trim().length > 0 ? clientIdRaw.trim() : null;
     const files = formData.getAll("images").filter((file): file is File => file instanceof File);
 
     if (files.length === 0) {
@@ -62,6 +65,7 @@ export async function POST(request: Request) {
 
     const dbProfile = await prisma.profile.create({
       data: {
+        clientId,
         sourceMode: normalized.sourceMode,
         confidence: analysis.profile.confidence,
         thinkingStyle: analysis.profile.thinkingStyle,
@@ -80,6 +84,13 @@ export async function POST(request: Request) {
       },
     });
 
+    let submissionCount = 1;
+    if (clientId) {
+      submissionCount = await prisma.profile.count({ where: { clientId } });
+    }
+    const tier: "first_impression" | "building_profile" | "full_profile" =
+      submissionCount <= 1 ? "first_impression" : submissionCount < 5 ? "building_profile" : "full_profile";
+
     const responseProfile: Profile = {
       ...analysis.profile,
       id: dbProfile.id,
@@ -89,7 +100,7 @@ export async function POST(request: Request) {
       promptVersion: analysis.promptVersion,
     };
 
-    return NextResponse.json({ profile: responseProfile, profileId: dbProfile.id, mindCard });
+    return NextResponse.json({ profile: responseProfile, profileId: dbProfile.id, mindCard, submissionCount, tier });
   } catch (error) {
     console.error("Analyze screenshots endpoint failed", error);
     return NextResponse.json({ error: "analysis_failed" }, { status: 500 });

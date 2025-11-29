@@ -35,6 +35,7 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const mode = body?.mode as SourceMode | undefined;
+    const clientId = typeof body?.clientId === "string" && body.clientId.trim().length > 0 ? body.clientId.trim() : null;
 
     if (!process.env.OPENAI_API_KEY) {
       console.error("OPENAI_API_KEY is missing");
@@ -75,6 +76,7 @@ export async function POST(request: Request) {
 
       const dbProfile = await prisma.profile.create({
         data: {
+          clientId,
           sourceMode: normalized.sourceMode,
           confidence: analysis.profile.confidence,
           thinkingStyle: analysis.profile.thinkingStyle,
@@ -93,6 +95,14 @@ export async function POST(request: Request) {
         },
       });
 
+      let submissionCount = 1;
+      if (clientId) {
+        submissionCount = await prisma.profile.count({ where: { clientId } });
+      }
+
+      const tier: "first_impression" | "building_profile" | "full_profile" =
+        submissionCount <= 1 ? "first_impression" : submissionCount < 5 ? "building_profile" : "full_profile";
+
       const profile: Profile = {
         ...analysis.profile,
         id: dbProfile.id,
@@ -102,7 +112,7 @@ export async function POST(request: Request) {
         promptVersion: analysis.promptVersion,
       };
 
-      return NextResponse.json({ profile, profileId: dbProfile.id, mindCard });
+      return NextResponse.json({ profile, profileId: dbProfile.id, mindCard, submissionCount, tier });
     }
 
     if (mode === "url") {
@@ -159,6 +169,7 @@ export async function POST(request: Request) {
 
       const dbProfile = await prisma.profile.create({
         data: {
+          clientId,
           sourceMode: normalized.sourceMode,
           confidence: analysis.profile.confidence,
           thinkingStyle: analysis.profile.thinkingStyle,
@@ -177,6 +188,13 @@ export async function POST(request: Request) {
         },
       });
 
+      let submissionCount = 1;
+      if (clientId) {
+        submissionCount = await prisma.profile.count({ where: { clientId } });
+      }
+      const tier: "first_impression" | "building_profile" | "full_profile" =
+        submissionCount <= 1 ? "first_impression" : submissionCount < 5 ? "building_profile" : "full_profile";
+
       const profile: Profile = {
         ...analysis.profile,
         id: dbProfile.id,
@@ -186,7 +204,7 @@ export async function POST(request: Request) {
         promptVersion: analysis.promptVersion,
       };
 
-      return NextResponse.json({ profile, profileId: dbProfile.id, mindCard });
+      return NextResponse.json({ profile, profileId: dbProfile.id, mindCard, submissionCount, tier });
     }
 
     if (mode === "screenshots") {
