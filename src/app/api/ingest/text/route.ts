@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { analyzeConversation } from "@/lib/analyzeConversation";
 import { normalizeTextInput } from "@/lib/normalizeInput";
 import { inferMindCard } from "@/lib/inferMindCard";
+import { logAnalysisError } from "@/lib/logAnalysisError";
 import type { Profile } from "@/types/profile";
 import type { MindCard } from "@/types/mindCard";
 
@@ -88,6 +89,13 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("Text ingest failed", error);
+    await logAnalysisError({
+      clientId: undefined,
+      sourceMode: "text",
+      errorCode: "analysis_failed",
+      message: error instanceof Error ? error.message : "Unknown error",
+      meta: { stack: error instanceof Error ? error.stack : String(error) },
+    });
     return NextResponse.json(
       { error: "Unable to process the pasted text." },
       { status: 500 },

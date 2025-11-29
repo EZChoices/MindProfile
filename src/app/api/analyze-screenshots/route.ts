@@ -5,10 +5,12 @@ import { analyzeConversation } from "@/lib/analyzeConversation";
 import { normalizeScreenshotInput } from "@/lib/normalizeInput";
 import { ocrImage } from "@/lib/ocr";
 import { inferMindCard } from "@/lib/inferMindCard";
+import { logAnalysisError } from "@/lib/logAnalysisError";
 import type { Profile } from "@/types/profile";
 import type { MindCard } from "@/types/mindCard";
 
 export async function POST(request: Request) {
+  let clientId: string | null = null;
   try {
     if (!process.env.OPENAI_API_KEY) {
       console.error("OPENAI_API_KEY is missing");
@@ -17,7 +19,7 @@ export async function POST(request: Request) {
 
     const formData = await request.formData();
     const clientIdRaw = formData.get("clientId");
-    const clientId =
+    clientId =
       typeof clientIdRaw === "string" && clientIdRaw.trim().length > 0 ? clientIdRaw.trim() : null;
     const files = formData.getAll("images").filter((file): file is File => file instanceof File);
 
@@ -103,6 +105,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ profile: responseProfile, profileId: dbProfile.id, mindCard, submissionCount, tier });
   } catch (error) {
     console.error("Analyze screenshots endpoint failed", error);
+    await logAnalysisError({
+      clientId,
+      sourceMode: "screenshots",
+      errorCode: "analysis_failed",
+      message: error instanceof Error ? error.message : "Unknown error",
+      meta: { stack: error instanceof Error ? error.stack : String(error) },
+    });
     return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { analyzeConversation } from "@/lib/analyzeConversation";
 import { normalizeTextInput, normalizeUrlInput } from "@/lib/normalizeInput";
 import { inferMindCard } from "@/lib/inferMindCard";
+import { logAnalysisError } from "@/lib/logAnalysisError";
 import type { Profile, SourceMode } from "@/types/profile";
 import type { MindCard } from "@/types/mindCard";
 
@@ -32,10 +33,11 @@ const isAllowedUrl = (url: URL) => {
 };
 
 export async function POST(request: Request) {
+  let clientId: string | null = null;
   try {
     const body = await request.json();
     const mode = body?.mode as SourceMode | undefined;
-    const clientId = typeof body?.clientId === "string" && body.clientId.trim().length > 0 ? body.clientId.trim() : null;
+    clientId = typeof body?.clientId === "string" && body.clientId.trim().length > 0 ? body.clientId.trim() : null;
 
     if (!process.env.OPENAI_API_KEY) {
       console.error("OPENAI_API_KEY is missing");
@@ -215,6 +217,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "invalid_input" }, { status: 400 });
   } catch (error) {
     console.error("Analyze endpoint failed", error);
+    await logAnalysisError({
+      clientId,
+      errorCode: "analysis_failed",
+      message: error instanceof Error ? error.message : "Unknown error",
+      meta: { stack: error instanceof Error ? error.stack : String(error) },
+    });
     return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
   }
 }

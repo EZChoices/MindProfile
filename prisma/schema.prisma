@@ -40,3 +40,17 @@ model Profile {
   @@index([createdAt])
   @@index([sourceMode])
 }
+
+model AnalysisLog {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  clientId       String?  @db.VarChar(64)
+  sourceMode     String?  @db.VarChar(32)
+  inputCharCount Int?
+  errorCode      String?  @db.VarChar(64)
+  message        String?
+  meta           Json?
+
+  @@index([createdAt])
+  @@index([clientId])
+}
