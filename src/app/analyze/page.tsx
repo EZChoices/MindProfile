@@ -5,6 +5,7 @@ import type { Profile, SourceMode, Tier } from "@/types/profile";
 import { ProfileFeedback } from "@/components/ProfileFeedback";
 import type { MindCard } from "@/types/mindCard";
 import { MindCardView } from "@/components/MindCardView";
+import { ShareLinkBlock } from "@/components/ShareLinkBlock";
 import { getOrCreateClientId } from "@/lib/clientId";
 
 type Mode = "link" | "text" | "screenshots";
@@ -22,6 +23,30 @@ const modeCopy: Record<Mode, string> = {
   screenshots: "Upload up to 5 screenshots of a chat. Works from your phone.",
 };
 
+const ShareLinkHelper = () => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative text-xs text-slate-200">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="rounded-full border border-white/20 px-2 py-1 text-[11px] text-emerald-100 hover:border-emerald-200"
+      >
+        How to get a share link?
+      </button>
+      {open && (
+        <div className="absolute right-0 z-10 mt-2 w-72 rounded-xl border border-white/10 bg-slate-900/90 p-3 text-[11px] leading-relaxed text-slate-100 shadow-lg">
+          <p className="font-semibold text-emerald-100">How to get a share link</p>
+          <ul className="mt-1 list-disc list-inside space-y-1">
+            <li>ChatGPT: open a conversation → click “Share” → “Copy link” → paste here.</li>
+            <li>Claude/Gemini: use their “Share / Copy link” on the chat, then paste.</li>
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function AnalyzePage() {
   const [mode, setMode] = useState<Mode>("text");
   const [shareUrl, setShareUrl] = useState("");
@@ -32,8 +57,6 @@ export default function AnalyzePage() {
   const [mindCard, setMindCard] = useState<MindCard | null>(null);
   const [profileSource, setProfileSource] = useState<ProfileSource | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
-  const [shareLink, setShareLink] = useState("");
-  const [copied, setCopied] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const [apiError, setApiError] = useState<string | null>(null);
   const [submissionCount, setSubmissionCount] = useState<number | null>(null);
@@ -50,18 +73,13 @@ export default function AnalyzePage() {
   };
 
   useEffect(() => {
-    if (profileId && typeof window !== "undefined") {
-      setShareLink(`${window.location.origin}/p/${profileId}`);
-    } else {
-      setShareLink("");
-    }
+    // no-op, kept for future hooks if needed
   }, [profileId]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setInputError(null);
     setApiError(null);
-    setCopied(false);
     setMindCard(null);
 
     const trimmedText = pastedText.trim();
@@ -218,6 +236,10 @@ export default function AnalyzePage() {
 
             {mode === "link" && (
               <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-semibold text-white">Chat share link</label>
+                  <ShareLinkHelper />
+                </div>
                 <input
                   type="url"
                   placeholder="https://chatgpt.com/share/..."
@@ -236,6 +258,14 @@ export default function AnalyzePage() {
 
             {mode === "text" && (
               <div className="space-y-2">
+                <div className="mb-1">
+                  <h3 className="text-sm font-semibold text-white">Best chats to paste</h3>
+                  <ul className="mb-3 list-inside list-disc text-xs text-slate-200">
+                    <li>Planning something important (trip, project, launch).</li>
+                    <li>Working through a real decision (job, move, money, relationship).</li>
+                    <li>Asking for help on a problem you actually care about.</li>
+                  </ul>
+                </div>
                 <textarea
                   rows={8}
                   placeholder="Paste 1-3 representative chats. We'll anonymize automatically."
@@ -254,7 +284,7 @@ export default function AnalyzePage() {
                   {inputError && <span className="text-xs text-red-200">{inputError}</span>}
                 </div>
                 <p className="text-xs text-slate-200">
-                  We only analyze what you paste here. Sensitive details are stripped in-pipeline.
+                  Tip: The more real and messy the conversation, the better the read. Avoid one-word questions or pure trivia.
                 </p>
               </div>
             )}
@@ -345,6 +375,7 @@ export default function AnalyzePage() {
               mindCard={mindCard}
               impressionLabel={tier === "full_profile" ? "AI impression from your chats" : "AI impression from this chat"}
             />
+            {profileId && <ShareLinkBlock sharePath={`/p/${profileId}`} />}
           </div>
         )}
 
@@ -409,39 +440,6 @@ export default function AnalyzePage() {
                 </ul>
               </div>
             </div>
-          </div>
-        )}
-
-        {profile && profileId && (
-          <div className="glass card-border space-y-4 rounded-3xl p-6 sm:p-10">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Share this profile</p>
-                <p className="muted text-sm">Send this link to view the read-only snapshot.</p>
-              </div>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!shareLink) return;
-                  try {
-                    await navigator.clipboard.writeText(shareLink);
-                    setCopied(true);
-                    setTimeout(() => setCopied(false), 1500);
-                  } catch {
-                    setCopied(false);
-                  }
-                }}
-                disabled={!shareLink}
-                className="rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-              >
-                {copied ? "Copied" : "Copy link"}
-              </button>
-            </div>
-            <input
-              readOnly
-              value={shareLink}
-              className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none"
-            />
           </div>
         )}
 

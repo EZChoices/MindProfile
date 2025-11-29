@@ -3,6 +3,7 @@ import type { Profile } from "@/types/profile";
 import { ProfileFeedback } from "@/components/ProfileFeedback";
 import type { MindCard } from "@/types/mindCard";
 import { MindCardView } from "@/components/MindCardView";
+import { ShareLinkBlock } from "@/components/ShareLinkBlock";
 
 export const dynamic = "force-dynamic";
 
@@ -186,6 +187,7 @@ export default async function ProfilePage({
         </div>
 
         {mindCard && <MindCardView mindCard={mindCard} />}
+        <ShareLinkBlock sharePath={`/p/${profile.id}`} />
 
         <div className="glass card-border space-y-6 rounded-3xl p-6 sm:p-10">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
