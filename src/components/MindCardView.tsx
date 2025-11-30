@@ -46,9 +46,7 @@ const ScoreBar = ({ label, value, helper }: ScoreBarProps) => {
           <span>{label}</span>
           {helper && <span className="text-[11px] text-slate-400">{helper}</span>}
         </div>
-        <span className="text-slate-100">
-          {clamped}/100 ({scoreBand(clamped)})
-        </span>
+        <span className="text-slate-100">{scoreBand(clamped)}</span>
       </div>
       <div className="mt-1 h-2 rounded-full bg-white/10">
         <div
@@ -57,6 +55,62 @@ const ScoreBar = ({ label, value, helper }: ScoreBarProps) => {
         />
       </div>
     </li>
+  );
+};
+
+const brainIndexBand = (score: number) => {
+  if (score < 36) return "Light signal";
+  if (score < 61) return "Everyday reasoning";
+  if (score < 81) return "Strong reasoning";
+  return "High-end reasoning signal";
+};
+
+const BrainIndexBlock = ({
+  score,
+  explanation,
+  brainScores,
+}: {
+  score: number;
+  explanation: string;
+  brainScores: MindCard["brainScores"];
+}) => {
+  const clamped = clampScore(score);
+  const band = brainIndexBand(clamped);
+
+  const summaries: string[] = [];
+  summaries.push(
+    clamped < 36
+      ? "Quick, concrete read"
+      : clamped < 61
+        ? "Balanced reasoning"
+        : clamped < 81
+          ? "Layered reasoning"
+          : "High-end complexity",
+  );
+  summaries.push(
+    `Curiosity: ${scoreBand(brainScores.curiosity).toLowerCase()}, Structure: ${scoreBand(brainScores.structure).toLowerCase()}, Emotion focus: ${scoreBand(brainScores.emotionalAttunement).toLowerCase()}`,
+  );
+
+  return (
+    <section className="rounded-2xl border border-white/10 bg-white/5 p-4">
+      <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-200">Brain Index</h3>
+      <div className="mt-2 flex items-center justify-between">
+        <div>
+          <p className="text-lg font-semibold text-white">{clamped}/100</p>
+          <p className="text-xs text-slate-200">{band}</p>
+        </div>
+        <div className="ml-4 h-2 w-32 rounded-full bg-white/10">
+          <div className="h-2 rounded-full bg-gradient-to-r from-emerald-300 to-sky-300" style={{ width: `${clamped}%` }} />
+        </div>
+      </div>
+      <ul className="mt-2 list-disc list-inside space-y-1 text-[11px] text-slate-200">
+        <li>{explanation}</li>
+        <li>{summaries.join(" · ")}</li>
+      </ul>
+      <p className="mt-1 text-[10px] text-slate-400">
+        0–35: Light signal · 36–60: Everyday reasoning · 61–80: Strong reasoning · 81–100: High-end reasoning signal. Based on this chat only.
+      </p>
+    </section>
   );
 };
 
@@ -81,6 +135,8 @@ export const MindCardView = ({ mindCard, impressionLabel }: MindCardViewProps) =
         </div>
       </div>
 
+      <BrainIndexBlock score={brainIndex.overall} explanation={brainIndex.explanation} brainScores={brainScores} />
+
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <h3 className="text-sm font-semibold text-white">Your brain scores</h3>
@@ -99,7 +155,7 @@ export const MindCardView = ({ mindCard, impressionLabel }: MindCardViewProps) =
 
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
           <h3 className="text-sm font-semibold text-white">Personality vibes</h3>
-          <p className="muted mb-3 mt-1 text-xs">Lightweight impressions, not clinical scores.</p>
+          <p className="muted mb-3 mt-1 text-xs">These are rough impressions from this chat, not clinical scores.</p>
           <div className="grid gap-4 md:grid-cols-2">
             <div>
               <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200">Big Five style</h4>
@@ -116,14 +172,10 @@ export const MindCardView = ({ mindCard, impressionLabel }: MindCardViewProps) =
               </ul>
             </div>
             <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-              <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200">MBTI-ish guess</h4>
-              <p className="mt-2 text-sm text-white">
-                <strong>{mbti.type}</strong> – {mbtiWords.join(" · ")}
-              </p>
-              <p className="text-xs text-slate-200">{mbti.blurb}</p>
-              <p className="muted mt-2 text-[11px]">
-                This is an MBTI-style vibe based only on this chat, not a full MBTI test.
-              </p>
+              <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-emerald-200">Closest MBTI type</h4>
+              <p className="mt-2 text-sm font-semibold text-white">{mbti.type}</p>
+              <p className="text-xs text-slate-200">{mbtiWords.join(" · ")}</p>
+              <p className="text-xs text-slate-200 mt-1">{mbti.blurb}</p>
             </div>
           </div>
         </div>
@@ -157,17 +209,6 @@ export const MindCardView = ({ mindCard, impressionLabel }: MindCardViewProps) =
             </p>
           )}
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-        <h3 className="text-sm font-semibold text-white">Brain Index</h3>
-        <p className="text-lg font-semibold text-white">
-          {brainIndex.overall}/100 ({scoreBand(brainIndex.overall)})
-        </p>
-        <p className="muted mt-2 text-xs">
-          AI&apos;s impression of your reasoning in this chat. Not a formal IQ test.
-        </p>
-        <p className="muted mt-1 text-xs">{brainIndex.explanation}</p>
       </div>
 
       <p className="muted text-[11px] text-slate-300">

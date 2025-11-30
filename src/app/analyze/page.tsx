@@ -50,6 +50,7 @@ const ShareLinkHelper = () => {
 export default function AnalyzePage() {
   const [mode, setMode] = useState<Mode>("text");
   const [shareUrl, setShareUrl] = useState("");
+  const [shareLinks, setShareLinks] = useState<string[]>([""]);
   const [pastedText, setPastedText] = useState("");
   const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
@@ -92,8 +93,9 @@ export default function AnalyzePage() {
         return;
       }
     } else if (mode === "link") {
-      if (!trimmedUrl) {
-        setInputError("Paste a valid public share link.");
+      const nonEmptyLinks = shareLinks.map((s) => s.trim()).filter(Boolean);
+      if (nonEmptyLinks.length === 0) {
+        setInputError("Paste at least one share link.");
         return;
       }
     } else if (mode === "screenshots") {
@@ -122,7 +124,7 @@ export default function AnalyzePage() {
             body:
               mode === "text"
                 ? JSON.stringify({ mode: "text", text: trimmedText, clientId })
-                : JSON.stringify({ mode: "url", url: trimmedUrl, clientId }),
+                : JSON.stringify({ mode: "url", shareUrls: shareLinks.map((s) => s.trim()).filter(Boolean), clientId }),
           });
         }
 
@@ -237,19 +239,45 @@ export default function AnalyzePage() {
             {mode === "link" && (
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-sm font-semibold text-white">Chat share link</label>
+                  <div>
+                    <label className="text-sm font-semibold text-white">Chat share links</label>
+                    <p className="text-[11px] text-slate-300">
+                      Paste 1–3 public ChatGPT/Claude/Gemini share links. We&apos;ll combine them.
+                    </p>
+                  </div>
                   <ShareLinkHelper />
                 </div>
-                <input
-                  type="url"
-                  placeholder="https://chatgpt.com/share/..."
-                  value={shareUrl}
-                  onChange={(e) => setShareUrl(e.target.value)}
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-emerald-300/60"
-                />
+                {shareLinks.map((link, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      type="url"
+                      placeholder="https://chatgpt.com/share/..."
+                      value={link}
+                      onChange={(e) => setShareLinks((prev) => prev.map((l, i) => (i === idx ? e.target.value : l)))}
+                      className="w-full flex-1 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-emerald-300/60"
+                    />
+                    {shareLinks.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setShareLinks((prev) => prev.filter((_, i) => i !== idx))}
+                        className="rounded-full border border-white/10 bg-white/10 px-2 py-1 text-xs text-slate-200 hover:border-emerald-200"
+                        aria-label="Remove link"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setShareLinks((prev) => [...prev, ""])}
+                  className="text-[11px] font-semibold text-emerald-200 underline underline-offset-4"
+                >
+                  + Add another link
+                </button>
                 <div className="flex items-start justify-between gap-3">
                   <p className="text-xs text-slate-200">
-                    Paste a public ChatGPT/Claude/Gemini share link. We only analyze what you paste here.
+                    Paste public share links only. We only analyze what you paste here.
                   </p>
                   {inputError && <span className="text-xs text-red-200">{inputError}</span>}
                 </div>

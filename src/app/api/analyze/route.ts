@@ -118,37 +118,45 @@ export async function POST(request: Request) {
     }
 
     if (mode === "url") {
-      const rawUrl = typeof body?.url === "string" ? body.url.trim() : "";
-      let parsedUrl: URL;
+      const shareUrls: string[] = Array.isArray(body?.shareUrls)
+        ? body.shareUrls.filter((u: unknown) => typeof u === "string").map((u: string) => u.trim()).filter(Boolean)
+        : [];
 
-      try {
-        parsedUrl = new URL(rawUrl);
-      } catch {
+      if (shareUrls.length === 0) {
         return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
       }
 
-      if (!rawUrl || !isAllowedUrl(parsedUrl)) {
-        return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
-      }
+      const collected: string[] = [];
 
-      let html: string;
-      try {
-        const res = await fetch(parsedUrl.toString());
-        if (!res.ok) {
-          return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
+      for (const rawUrl of shareUrls) {
+        let parsedUrl: URL;
+        try {
+          parsedUrl = new URL(rawUrl);
+        } catch {
+          continue;
         }
-        html = await res.text();
-      } catch (error) {
-        console.error("Failed to fetch shared URL", error);
+
+        if (!isAllowedUrl(parsedUrl)) continue;
+
+        try {
+          const res = await fetch(parsedUrl.toString());
+          if (!res.ok) continue;
+          const html = await res.text();
+          const extracted = extractTextFromHtml(html);
+          if (extracted && extracted.length >= 50) {
+            collected.push(extracted);
+          }
+        } catch (error) {
+          console.error("Failed to fetch shared URL", error);
+        }
+      }
+
+      const combined = collected.join("\n\n---\n\n").trim();
+      if (!combined || combined.length < 50) {
         return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
       }
 
-      const extracted = extractTextFromHtml(html);
-      if (!extracted || extracted.length < 50) {
-        return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
-      }
-
-      const normalized = normalizeUrlInput(extracted, parsedUrl.toString());
+      const normalized = normalizeUrlInput(combined, shareUrls[0] || "");
       const analysis = await analyzeConversation({
         normalizedText: normalized.normalizedText,
         inputCharCount: normalized.inputCharCount,
