@@ -86,6 +86,18 @@ const NotFound = () => (
   </main>
 );
 
+const readStrengthLabel = (confidence?: Profile["confidence"]) => {
+  if (confidence === "high") return "Strong";
+  if (confidence === "medium") return "Solid";
+  return "Light";
+};
+
+const readStrengthNote = (confidence?: Profile["confidence"]) => {
+  if (confidence === "high") return "Rich conversation with clear patterns — this should feel close to you.";
+  if (confidence === "medium") return "Decent amount of information, but still limited context.";
+  return "Short or narrow chat — treat this as a first impression.";
+};
+
 export default async function ProfilePage({
   params,
 }: {
@@ -138,9 +150,6 @@ export default async function ProfilePage({
 
   const profile = toProfile(record);
   const mindCard = parseMindCard(record.mindCard);
-  const confidenceLabel = `${profile.confidence.charAt(0).toUpperCase()}${profile.confidence.slice(
-    1,
-  )}`;
 
   const sourceLabel =
     record.sourceMode === "url"
@@ -177,12 +186,22 @@ export default async function ProfilePage({
           <h1 className="font-[var(--font-display)] text-4xl text-white sm:text-5xl">
             Your MindProfile snapshot
           </h1>
-          <p className="muted text-base leading-relaxed text-slate-100">
+                    <p className="muted text-base leading-relaxed text-slate-100">
             Read-only view generated from a single conversation sample. Not a psychological assessment.
           </p>
           <p className="muted text-xs text-slate-200">
-            Source: {sourceFriendly} • Confidence: {confidenceLabel}
-            {lengthLabel ? ` • Length: ${lengthLabel}` : ""} • Generated: {createdDisplay}
+            Source: {sourceFriendly} • Generated: {createdDisplay}
+            {lengthLabel ? ` • Length: ${lengthLabel}` : ""}
+          </p>
+          <p className="text-xs text-slate-200">
+            Read strength: {readStrengthLabel(profile.confidence)}
+            <span
+              className="ml-1 text-[10px] text-slate-400 cursor-help"
+              title="How sure the model is about these patterns based on the amount and richness of text in this chat."
+            >
+              ?
+            </span>
+            <span className="block text-[11px] text-slate-400">{readStrengthNote(profile.confidence)}</span>
           </p>
         </div>
 
@@ -195,7 +214,15 @@ export default async function ProfilePage({
               <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                 Your MindProfile snapshot
               </p>
-              <p className="muted mt-1 text-sm">Confidence: {confidenceLabel}</p>
+              <p className="muted mt-1 text-sm">
+                Read strength: {readStrengthLabel(profile.confidence)}{" "}
+                <span
+                  className="ml-1 text-[10px] text-slate-400 cursor-help"
+                  title="How sure the model is about these patterns based on the amount and richness of text in this chat."
+                >
+                  ?
+                </span>
+              </p>
             </div>
             <span className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-4 py-2 text-xs text-emerald-50">
               {sourceLabel}
@@ -264,4 +291,8 @@ export default async function ProfilePage({
     </main>
   );
 }
+
+
+
+
 

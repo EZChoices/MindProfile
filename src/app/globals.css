@@ -23,9 +23,7 @@
 
 body {
   color: var(--text);
-  background: radial-gradient(circle at 10% 10%, rgba(114, 246, 201, 0.14), transparent 26%),
-    radial-gradient(circle at 80% 0%, rgba(139, 161, 255, 0.22), transparent 30%),
-    linear-gradient(120deg, #05060f 0%, #090a14 80%);
+  background: linear-gradient(120deg, #060914 0%, #0a0c13 80%);
   min-height: 100vh;
   font-family: var(--font-body), system-ui, -apple-system, sans-serif;
   letter-spacing: 0.01em;
@@ -36,15 +34,15 @@ a {
 }
 
 .glass {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  box-shadow: 0 10px 50px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.02);
+  background: rgba(12, 16, 24, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
 }
 
 .pill {
   border-radius: 9999px;
-  border: 1px solid var(--border);
-  background: linear-gradient(120deg, rgba(114, 246, 201, 0.16), rgba(139, 161, 255, 0.12));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(114, 246, 201, 0.12);
 }
 
 .beam {
@@ -55,18 +53,18 @@ a {
   content: "";
   position: absolute;
   inset: -2px;
-  background: radial-gradient(circle at 20% 30%, rgba(114, 246, 201, 0.2), transparent 25%),
-    radial-gradient(circle at 80% 10%, rgba(139, 161, 255, 0.3), transparent 30%),
-    radial-gradient(circle at 50% 80%, rgba(114, 246, 201, 0.18), transparent 22%);
-  filter: blur(40px);
-  opacity: 0.7;
+  background: radial-gradient(circle at 20% 30%, rgba(114, 246, 201, 0.08), transparent 20%),
+    radial-gradient(circle at 80% 10%, rgba(139, 161, 255, 0.1), transparent 24%),
+    radial-gradient(circle at 50% 80%, rgba(114, 246, 201, 0.08), transparent 18%);
+  filter: blur(60px);
+  opacity: 0.35;
   z-index: -1;
 }
 
 .gridlines {
-  background-image: linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-  background-size: 60px 60px;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 70px 70px;
 }
 
 .card-border {
@@ -79,13 +77,13 @@ a {
   inset: 0;
   border-radius: 18px;
   padding: 1px;
-  background: linear-gradient(120deg, rgba(114, 246, 201, 0.6), rgba(139, 161, 255, 0.5));
+  background: rgba(255, 255, 255, 0.04);
   -webkit-mask:
     linear-gradient(#000, #000) content-box,
     linear-gradient(#000, #000);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  opacity: 0.4;
+  opacity: 0.35;
   pointer-events: none;
 }
 
