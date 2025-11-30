@@ -59,6 +59,7 @@ export default async function AdminProfilesPage({
       inputCharCount: true,
       errorCode: true,
       message: true,
+      meta: true,
     },
   });
 
@@ -164,35 +165,39 @@ export default async function AdminProfilesPage({
               <tr>
                 <th className="px-3 py-2">Time</th>
                 <th className="px-3 py-2">Source</th>
-                <th className="px-3 py-2">Chars</th>
-                <th className="px-3 py-2">Error</th>
-                <th className="px-3 py-2">Message</th>
-                <th className="px-3 py-2">Client</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((log) => (
+                  <th className="px-3 py-2">Chars</th>
+                  <th className="px-3 py-2">Error</th>
+                  <th className="px-3 py-2">Message</th>
+                  <th className="px-3 py-2">Meta</th>
+                  <th className="px-3 py-2">Client</th>
+                </tr>
+              </thead>
+              <tbody>
+                {logs.map((log) => (
                 <tr key={log.id} className="border-t border-white/5">
                   <td className="px-3 py-2 text-slate-200">{formatDate(log.createdAt)}</td>
                   <td className="px-3 py-2 text-slate-200">{log.sourceMode ?? "-"}</td>
                   <td className="px-3 py-2 text-slate-200">
                     {typeof log.inputCharCount === "number" ? `~${log.inputCharCount}` : "-"}
                   </td>
-                  <td className="px-3 py-2 text-amber-200">{log.errorCode ?? "-"}</td>
-                  <td className="px-3 py-2 text-slate-200 truncate max-w-[180px]" title={log.message ?? ""}>
-                    {log.message ?? "-"}
-                  </td>
-                  <td className="px-3 py-2 text-slate-400">{log.clientId ?? "-"}</td>
-                </tr>
-              ))}
-              {logs.length === 0 && (
-                <tr>
-                  <td className="px-3 py-3 text-slate-400" colSpan={6}>
-                    No errors logged.
-                  </td>
-                </tr>
-              )}
-            </tbody>
+                    <td className="px-3 py-2 text-amber-200">{log.errorCode ?? "-"}</td>
+                    <td className="px-3 py-2 text-slate-200 truncate max-w-[180px]" title={log.message ?? ""}>
+                      {log.message ?? "-"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-400 truncate max-w-[160px]" title={JSON.stringify(log.meta ?? {})}>
+                      {log.meta ? JSON.stringify(log.meta).slice(0, 80) + (JSON.stringify(log.meta).length > 80 ? "…" : "") : "-"}
+                    </td>
+                    <td className="px-3 py-2 text-slate-400">{log.clientId ?? "-"}</td>
+                  </tr>
+                ))}
+                {logs.length === 0 && (
+                  <tr>
+                    <td className="px-3 py-3 text-slate-400" colSpan={7}>
+                      No errors logged.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
           </table>
         </div>
       </div>

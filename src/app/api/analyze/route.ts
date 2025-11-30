@@ -32,6 +32,17 @@ const isAllowedUrl = (url: URL) => {
   return protocolOk && allowedHosts.some((host) => url.hostname.toLowerCase().endsWith(host));
 };
 
+const looksLikeBoilerplate = (text: string) => {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("by messaging chatgpt") ||
+    lower.includes("log in sign up for free") ||
+    lower.includes("terms of use") ||
+    lower.includes("privacy policy") ||
+    lower.length < 80
+  );
+};
+
 export async function POST(request: Request) {
   let clientId: string | null = null;
   try {
@@ -127,6 +138,7 @@ export async function POST(request: Request) {
       }
 
       const collected: string[] = [];
+      const lengths: number[] = [];
 
       for (const rawUrl of shareUrls) {
         let parsedUrl: URL;
@@ -145,6 +157,7 @@ export async function POST(request: Request) {
           const extracted = extractTextFromHtml(html);
           if (extracted && extracted.length >= 50) {
             collected.push(extracted);
+            lengths.push(extracted.length);
           }
         } catch (error) {
           console.error("Failed to fetch shared URL", error);
@@ -152,7 +165,19 @@ export async function POST(request: Request) {
       }
 
       const combined = collected.join("\n\n---\n\n").trim();
-      if (!combined || combined.length < 50) {
+      if (!combined || combined.length < 50 || looksLikeBoilerplate(combined)) {
+        await logAnalysisError({
+          clientId,
+          sourceMode: "url",
+          inputCharCount: combined.length,
+          errorCode: "url_boilerplate",
+          message: "Share URL text looks like boilerplate/too short",
+          meta: {
+            shareUrls,
+            lengths,
+            sample: combined.slice(0, 200),
+          },
+        });
         return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
       }
 
