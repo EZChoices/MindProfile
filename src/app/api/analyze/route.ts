@@ -35,20 +35,48 @@ const extractChatGptShareText = (html: string): string | null => {
     if (!script) return null;
     const data = JSON.parse(script);
 
+    // Try common paths ChatGPT uses
+    const shared =
+      data?.props?.pageProps?.sharedConversation ||
+      data?.props?.pageProps?.serverResponse?.sharedConversation ||
+      data?.props?.pageProps?.serverResponse ||
+      null;
+
+    const messages =
+      shared?.messages ||
+      shared?.mapping && Object.values(shared.mapping as Record<string, any>).map((m: any) => m.message).filter(Boolean) ||
+      [];
+
+    if (Array.isArray(messages) && messages.length) {
+      const parts: string[] = [];
+      for (const msg of messages) {
+        const content = msg?.message?.content ?? msg?.content;
+        if (!content) continue;
+        if (Array.isArray(content.parts)) {
+          parts.push(content.parts.join(" "));
+        } else if (typeof content.text === "string") {
+          parts.push(content.text);
+        } else if (typeof content === "string") {
+          parts.push(content);
+        }
+      }
+      const combined = parts.join("\n").replace(/\s+/g, " ").trim();
+      return combined.length ? combined : null;
+    }
+
+    // fallback: breadth search for message-like objects
     const queue: any[] = [data];
     while (queue.length) {
       const current = queue.shift();
       if (Array.isArray(current)) {
-        if (
-          current.length &&
-          typeof current[0] === "object" &&
-          current[0] &&
-          ("message" in current[0] || ("content" in current[0] && "author" in current[0]))
-        ) {
-          const messages = current as any[];
+        current.forEach((item) => {
+          if (item && typeof item === "object") queue.push(item);
+        });
+      } else if (current && typeof current === "object") {
+        if (current.messages && Array.isArray(current.messages)) {
           const parts: string[] = [];
-          for (const msg of messages) {
-            const content = msg.message?.content ?? msg.content;
+          for (const msg of current.messages) {
+            const content = msg?.message?.content ?? msg?.content;
             if (!content) continue;
             if (Array.isArray(content.parts)) {
               parts.push(content.parts.join(" "));
@@ -59,12 +87,9 @@ const extractChatGptShareText = (html: string): string | null => {
             }
           }
           const combined = parts.join("\n").replace(/\s+/g, " ").trim();
-          return combined.length ? combined : null;
+          if (combined.length) return combined;
         }
-      } else if (current && typeof current === "object") {
-        for (const key of Object.keys(current)) {
-          queue.push((current as any)[key]);
-        }
+        Object.values(current).forEach((v) => queue.push(v));
       }
     }
   } catch (error) {
@@ -192,18 +217,26 @@ export async function POST(request: Request) {
       const collected: string[] = [];
       const lengths: number[] = [];
 
+      const perUrlMeta: Array<{ url: string; status?: number; extractedLength?: number; reason?: string }> = [];
+
       for (const rawUrl of shareUrls) {
         let parsedUrl: URL;
         try {
           parsedUrl = new URL(rawUrl);
         } catch {
+          perUrlMeta.push({ url: rawUrl, reason: "invalid_url" });
           continue;
         }
 
         if (!isAllowedUrl(parsedUrl)) continue;
 
         try {
-          const res = await fetch(parsedUrl.toString());
+          const res = await fetch(parsedUrl.toString(), {
+            headers: {
+              "User-Agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            },
+          });
           if (!res.ok) continue;
           const html = await res.text();
           const extractedShare = extractChatGptShareText(html);
@@ -211,9 +244,18 @@ export async function POST(request: Request) {
           if (extracted && extracted.length >= 50 && !looksLikeBoilerplate(extracted)) {
             collected.push(extracted);
             lengths.push(extracted.length);
+            perUrlMeta.push({ url: rawUrl, status: res.status, extractedLength: extracted.length });
+          } else {
+            perUrlMeta.push({
+              url: rawUrl,
+              status: res.status,
+              extractedLength: extracted?.length ?? 0,
+              reason: "boilerplate_or_short",
+            });
           }
         } catch (error) {
           console.error("Failed to fetch shared URL", error);
+          perUrlMeta.push({ url: rawUrl, reason: "fetch_failed" });
         }
       }
 
@@ -229,6 +271,7 @@ export async function POST(request: Request) {
             shareUrls,
             lengths,
             sample: combined.slice(0, 200),
+            perUrlMeta,
             collectedCount: collected.length,
           },
         });
