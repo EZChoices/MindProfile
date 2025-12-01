@@ -156,8 +156,10 @@ export async function POST(request: Request) {
           const html = await res.text();
           const extracted = extractTextFromHtml(html);
           if (extracted && extracted.length >= 50) {
-            collected.push(extracted);
-            lengths.push(extracted.length);
+            if (!looksLikeBoilerplate(extracted)) {
+              collected.push(extracted);
+              lengths.push(extracted.length);
+            }
           }
         } catch (error) {
           console.error("Failed to fetch shared URL", error);
@@ -165,12 +167,12 @@ export async function POST(request: Request) {
       }
 
       const combined = collected.join("\n\n---\n\n").trim();
-      if (!combined || combined.length < 50 || looksLikeBoilerplate(combined)) {
+      if (!combined || combined.length < 50) {
         await logAnalysisError({
           clientId,
           sourceMode: "url",
           inputCharCount: combined.length,
-          errorCode: "url_boilerplate",
+          errorCode: "url_boilerplate_or_empty",
           message: "Share URL text looks like boilerplate/too short",
           meta: {
             shareUrls,
