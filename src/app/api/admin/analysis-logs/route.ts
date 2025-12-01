@@ -23,6 +23,7 @@ export async function GET(request: NextRequest) {
       inputCharCount: true,
       errorCode: true,
       message: true,
+      meta: true,
     },
   });
 
