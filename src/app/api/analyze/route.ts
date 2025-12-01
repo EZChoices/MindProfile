@@ -201,6 +201,40 @@ const fetchChatGptShareTextFromDataEndpoint = async (
   }
 };
 
+const fetchChatGptShareTextFromShareApi = async (
+  parsedUrl: URL,
+  cookieHeader?: string | null,
+): Promise<string | null> => {
+  const shareId = parsedUrl.pathname.split("/").filter(Boolean).pop();
+  if (!shareId) {
+    console.warn("ChatGPT share link missing shareId for backend-api fetch", { url: parsedUrl.toString() });
+    return null;
+  }
+  const apiUrl = `${parsedUrl.origin}/backend-api/share/${shareId}`;
+  try {
+    const headers: Record<string, string> = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    };
+    if (cookieHeader) headers.Cookie = cookieHeader;
+
+    const res = await fetch(apiUrl, { headers });
+    if (!res.ok) {
+      console.warn("ChatGPT share backend-api fetch failed", { url: apiUrl, status: res.status });
+      return null;
+    }
+    const data = await res.json();
+    const extracted = extractChatGptShareTextFromData(data);
+    if (!extracted) {
+      console.warn("ChatGPT share backend-api missing conversation content", { url: apiUrl });
+    }
+    return extracted;
+  } catch (error) {
+    console.warn("Failed to fetch ChatGPT backend-api share data", { url: apiUrl, error });
+    return null;
+  }
+};
+
 const isAllowedUrl = (url: URL) => {
   const protocolOk = url.protocol === "http:" || url.protocol === "https:";
   return protocolOk && allowedHosts.some((host) => url.hostname.toLowerCase().endsWith(host));
@@ -347,6 +381,10 @@ export async function POST(request: Request) {
           if (!extractedShare && isChatGptShare) {
             console.warn("ChatGPT share page missing embedded conversation, trying data endpoint", { url: rawUrl });
             extractedShare = await fetchChatGptShareTextFromDataEndpoint(parsedUrl, buildId, cookieHeader);
+          }
+          if (!extractedShare && isChatGptShare) {
+            console.warn("ChatGPT share content unavailable after data endpoint, trying backend-api/share", { url: rawUrl });
+            extractedShare = await fetchChatGptShareTextFromShareApi(parsedUrl, cookieHeader);
           }
           if (!extractedShare && isChatGptShare) {
             console.warn("ChatGPT share content unavailable after extraction attempts", { url: rawUrl });

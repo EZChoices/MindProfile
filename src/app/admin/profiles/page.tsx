@@ -110,6 +110,17 @@ export default async function AdminProfilesPage({
                       ? profile.inputSourceHost
                       : `https://${profile.inputSourceHost}`
                     : null;
+                const sourceLabel = (() => {
+                  if (!sourceLink) return profile.sourceMode;
+                  try {
+                    const url = new URL(sourceLink);
+                    const shareId = url.pathname.split("/").filter(Boolean).pop();
+                    const tail = shareId ? `/…${shareId.slice(-6)}` : url.pathname;
+                    return `${url.hostname}${tail}`;
+                  } catch {
+                    return profile.inputSourceHost ?? profile.sourceMode;
+                  }
+                })();
 
                 return (
                   <tr key={profile.id} className="border-t border-white/5">
@@ -117,7 +128,7 @@ export default async function AdminProfilesPage({
                     <td className="px-4 py-3 text-slate-200">
                       {sourceLink ? (
                         <a href={sourceLink} className="text-emerald-200 underline break-words" target="_blank" rel="noreferrer">
-                          {profile.inputSourceHost}
+                          {sourceLabel}
                         </a>
                       ) : (
                         profile.sourceMode
