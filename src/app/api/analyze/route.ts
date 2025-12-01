@@ -27,6 +27,52 @@ const extractTextFromHtml = (html: string): string => {
   return text;
 };
 
+// Attempt to extract messages from ChatGPT share pages (__NEXT_DATA__)
+const extractChatGptShareText = (html: string): string | null => {
+  try {
+    const $ = load(html);
+    const script = $("#__NEXT_DATA__").html();
+    if (!script) return null;
+    const data = JSON.parse(script);
+
+    const queue: any[] = [data];
+    while (queue.length) {
+      const current = queue.shift();
+      if (Array.isArray(current)) {
+        if (
+          current.length &&
+          typeof current[0] === "object" &&
+          current[0] &&
+          ("message" in current[0] || ("content" in current[0] && "author" in current[0]))
+        ) {
+          const messages = current as any[];
+          const parts: string[] = [];
+          for (const msg of messages) {
+            const content = msg.message?.content ?? msg.content;
+            if (!content) continue;
+            if (Array.isArray(content.parts)) {
+              parts.push(content.parts.join(" "));
+            } else if (typeof content.text === "string") {
+              parts.push(content.text);
+            } else if (typeof content === "string") {
+              parts.push(content);
+            }
+          }
+          const combined = parts.join("\n").replace(/\s+/g, " ").trim();
+          return combined.length ? combined : null;
+        }
+      } else if (current && typeof current === "object") {
+        for (const key of Object.keys(current)) {
+          queue.push((current as any)[key]);
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Failed to parse ChatGPT share JSON", error);
+  }
+  return null;
+};
+
 const isAllowedUrl = (url: URL) => {
   const protocolOk = url.protocol === "http:" || url.protocol === "https:";
   return protocolOk && allowedHosts.some((host) => url.hostname.toLowerCase().endsWith(host));
@@ -160,12 +206,11 @@ export async function POST(request: Request) {
           const res = await fetch(parsedUrl.toString());
           if (!res.ok) continue;
           const html = await res.text();
-          const extracted = extractTextFromHtml(html);
-          if (extracted && extracted.length >= 50) {
-            if (!looksLikeBoilerplate(extracted)) {
-              collected.push(extracted);
-              lengths.push(extracted.length);
-            }
+          const extractedShare = extractChatGptShareText(html);
+          const extracted = extractedShare || extractTextFromHtml(html);
+          if (extracted && extracted.length >= 50 && !looksLikeBoilerplate(extracted)) {
+            collected.push(extracted);
+            lengths.push(extracted.length);
           }
         } catch (error) {
           console.error("Failed to fetch shared URL", error);
