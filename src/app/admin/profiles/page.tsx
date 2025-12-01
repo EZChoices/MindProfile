@@ -174,13 +174,14 @@ export default async function AdminProfilesPage({
               </thead>
               <tbody>
                 {logs.map((log) => {
-                  const meta = (log.meta ?? {}) as { shareUrls?: string[] };
-                  const urls =
-                    meta && Array.isArray(meta.shareUrls)
-                      ? meta.shareUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
+                  const meta = (log.meta ?? {}) as { shareUrls?: unknown };
+                  const shareUrls =
+                    Array.isArray(meta.shareUrls) && meta.shareUrls.length
+                      ? meta.shareUrls.filter((u): u is string => typeof u === "string" && u.trim().length > 0)
                       : [];
                   const metaStr = JSON.stringify(log.meta ?? {});
-                  const truncatedMeta = metaStr.length > 100 ? `${metaStr.slice(0, 100)}…` : metaStr;
+                  const truncatedMeta = metaStr.length > 120 ? `${metaStr.slice(0, 120)}…` : metaStr;
+
                   return (
                     <tr key={log.id} className="border-t border-white/5">
                       <td className="px-3 py-2 text-slate-200">{formatDate(log.createdAt)}</td>
@@ -192,10 +193,10 @@ export default async function AdminProfilesPage({
                       <td className="px-3 py-2 text-slate-200 truncate max-w-[180px]" title={log.message ?? ""}>
                         {log.message ?? "-"}
                       </td>
-                      <td className="px-3 py-2 text-slate-400 truncate max-w-[200px]" title={metaStr}>
-                        {urls.length > 0 ? (
+                      <td className="px-3 py-2 text-slate-400 truncate max-w-[240px]" title={metaStr}>
+                        {shareUrls.length > 0 ? (
                           <span className="flex flex-wrap gap-1">
-                            {urls.map((u, i) => (
+                            {shareUrls.map((u, i) => (
                               <span key={`${log.id}-url-${i}`} className="flex items-center gap-1">
                                 {i > 0 && <span>,</span>}
                                 <a href={u} className="text-emerald-200 underline" target="_blank" rel="noreferrer">
@@ -204,10 +205,8 @@ export default async function AdminProfilesPage({
                               </span>
                             ))}
                           </span>
-                        ) : log.meta ? (
-                          truncatedMeta
                         ) : (
-                          "-"
+                          truncatedMeta || "-"
                         )}
                       </td>
                       <td className="px-3 py-2 text-slate-400">{log.clientId ?? "-"}</td>
