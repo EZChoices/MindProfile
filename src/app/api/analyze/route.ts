@@ -18,6 +18,37 @@ const allowedHosts = [
   "ai.google.com",
 ];
 
+const buildCookieHeader = (setCookieHeader: string | null): string | null => {
+  if (!setCookieHeader) return null;
+  const rawEntries: string[] = [];
+  let current = "";
+  let inExpires = false;
+
+  for (let i = 0; i < setCookieHeader.length; i++) {
+    const char = setCookieHeader[i];
+    const next = setCookieHeader.slice(i, i + 8).toLowerCase();
+    if (next === "expires=") {
+      inExpires = true;
+    }
+    if (char === "," && !inExpires) {
+      if (current.trim()) rawEntries.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+    if (char === ";" && inExpires) {
+      inExpires = false;
+    }
+  }
+  if (current.trim()) rawEntries.push(current.trim());
+
+  const cookies = rawEntries
+    .map((entry) => entry.split(";")[0]?.trim())
+    .filter((entry): entry is string => Boolean(entry));
+
+  return cookies.length ? cookies.join("; ") : null;
+};
+
 const extractTextFromHtml = (html: string): string => {
   const $ = load(html);
   $("script, style").remove();
@@ -27,41 +58,75 @@ const extractTextFromHtml = (html: string): string => {
   return text;
 };
 
-// Attempt to extract messages from ChatGPT share pages (__NEXT_DATA__)
-const extractChatGptShareText = (html: string): string | null => {
+const parseNextDataFromHtml = (html: string): { data: any | null; buildId: string | null } => {
   try {
     const $ = load(html);
     const script = $("#__NEXT_DATA__").html();
-    if (!script) return null;
-    const data = JSON.parse(script);
+    const data = script ? JSON.parse(script) : null;
+    const buildAttr = $("html").attr("data-build");
+    const buildId =
+      (data && typeof data?.buildId === "string" ? data.buildId : null) ||
+      (typeof buildAttr === "string" && buildAttr.length ? buildAttr : null);
+    return { data, buildId };
+  } catch (error) {
+    console.warn("Failed to parse __NEXT_DATA__", error);
+    return { data: null, buildId: null };
+  }
+};
 
-    // Try common paths ChatGPT uses
+const normalizeChatGptMessageContent = (message: any): string | null => {
+  const role = message?.message?.author?.role ?? message?.author?.role;
+  if (role && role !== "user" && role !== "assistant") return null;
+  const content = message?.message?.content ?? message?.content;
+  if (!content) return null;
+  if (Array.isArray(content.parts)) {
+    const parts = content.parts.filter((p: unknown) => typeof p === "string") as string[];
+    return parts.join(" ");
+  }
+  if (typeof content.text === "string") return content.text;
+  if (typeof content === "string") return content;
+  return null;
+};
+
+const combineChatGptMessages = (messages: any[]): string | null => {
+  const parts: string[] = [];
+  for (const msg of messages) {
+    const text = normalizeChatGptMessageContent(msg);
+    if (text && text.trim().length) {
+      parts.push(text.trim());
+    }
+  }
+  const combined = parts.join("\n").replace(/\s+/g, " ").trim();
+  return combined.length ? combined : null;
+};
+
+const extractChatGptShareTextFromData = (data: any): string | null => {
+  try {
+    if (!data) return null;
+    const pageProps = data?.props?.pageProps ?? data?.pageProps;
     const shared =
-      data?.props?.pageProps?.sharedConversation ||
-      data?.props?.pageProps?.serverResponse?.sharedConversation ||
-      data?.props?.pageProps?.serverResponse ||
+      pageProps?.sharedConversation ||
+      pageProps?.serverResponse?.sharedConversation ||
+      pageProps?.serverResponse ||
       null;
 
-    const messages =
-      shared?.messages ||
-      shared?.mapping && Object.values(shared.mapping as Record<string, any>).map((m: any) => m.message).filter(Boolean) ||
-      [];
+    if (Array.isArray(shared?.messages) && shared.messages.length) {
+      const combined = combineChatGptMessages(shared.messages);
+      if (combined) return combined;
+    }
 
-    if (Array.isArray(messages) && messages.length) {
-      const parts: string[] = [];
-      for (const msg of messages) {
-        const content = msg?.message?.content ?? msg?.content;
-        if (!content) continue;
-        if (Array.isArray(content.parts)) {
-          parts.push(content.parts.join(" "));
-        } else if (typeof content.text === "string") {
-          parts.push(content.text);
-        } else if (typeof content === "string") {
-          parts.push(content);
-        }
-      }
-      const combined = parts.join("\n").replace(/\s+/g, " ").trim();
-      return combined.length ? combined : null;
+    const mappingSource =
+      (shared?.mapping && typeof shared.mapping === "object" && shared.mapping) ||
+      (pageProps?.serverResponse?.mapping && typeof pageProps.serverResponse.mapping === "object" && pageProps.serverResponse.mapping) ||
+      null;
+
+    if (mappingSource) {
+      const mappingMessages = Object.values(mappingSource as Record<string, any>)
+        .map((m: any) => m?.message)
+        .filter(Boolean);
+      mappingMessages.sort((a: any, b: any) => (a?.create_time ?? 0) - (b?.create_time ?? 0));
+      const combined = combineChatGptMessages(mappingMessages);
+      if (combined) return combined;
     }
 
     // fallback: breadth search for message-like objects
@@ -73,21 +138,17 @@ const extractChatGptShareText = (html: string): string | null => {
           if (item && typeof item === "object") queue.push(item);
         });
       } else if (current && typeof current === "object") {
-        if (current.messages && Array.isArray(current.messages)) {
-          const parts: string[] = [];
-          for (const msg of current.messages) {
-            const content = msg?.message?.content ?? msg?.content;
-            if (!content) continue;
-            if (Array.isArray(content.parts)) {
-              parts.push(content.parts.join(" "));
-            } else if (typeof content.text === "string") {
-              parts.push(content.text);
-            } else if (typeof content === "string") {
-              parts.push(content);
-            }
-          }
-          const combined = parts.join("\n").replace(/\s+/g, " ").trim();
-          if (combined.length) return combined;
+        if (current.messages && Array.isArray(current.messages) && current.messages.length) {
+          const combined = combineChatGptMessages(current.messages);
+          if (combined) return combined;
+        }
+        if (current.mapping && typeof current.mapping === "object") {
+          const mappingMessages = Object.values(current.mapping as Record<string, any>)
+            .map((m: any) => m?.message)
+            .filter(Boolean);
+          mappingMessages.sort((a: any, b: any) => (a?.create_time ?? 0) - (b?.create_time ?? 0));
+          const combined = combineChatGptMessages(mappingMessages);
+          if (combined) return combined;
         }
         Object.values(current).forEach((v) => queue.push(v));
       }
@@ -98,6 +159,48 @@ const extractChatGptShareText = (html: string): string | null => {
   return null;
 };
 
+const fetchChatGptShareTextFromDataEndpoint = async (
+  parsedUrl: URL,
+  buildId: string | null,
+  cookieHeader?: string | null,
+): Promise<string | null> => {
+  const shareId = parsedUrl.pathname.split("/").filter(Boolean).pop();
+  if (!shareId) {
+    console.warn("ChatGPT share link missing shareId", { url: parsedUrl.toString() });
+    return null;
+  }
+  if (!buildId) {
+    console.warn("ChatGPT share page missing buildId for dynamic fetch", { url: parsedUrl.toString() });
+    return null;
+  }
+  const dataUrl = `${parsedUrl.origin}/_next/data/${buildId}/share/${shareId}.json?shareParams=${shareId}`;
+  try {
+    const headers: Record<string, string> = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    };
+    if (cookieHeader) {
+      headers.Cookie = cookieHeader;
+    }
+    const dataRes = await fetch(dataUrl, {
+      headers,
+    });
+    if (!dataRes.ok) {
+      console.warn("ChatGPT share data fetch failed", { url: dataUrl, status: dataRes.status });
+      return null;
+    }
+    const data = await dataRes.json();
+    const extracted = extractChatGptShareTextFromData(data);
+    if (!extracted) {
+      console.warn("ChatGPT share data missing sharedConversation", { url: dataUrl });
+    }
+    return extracted;
+  } catch (error) {
+    console.warn("Failed to fetch ChatGPT share dataUrl", { url: dataUrl, error });
+    return null;
+  }
+};
+
 const isAllowedUrl = (url: URL) => {
   const protocolOk = url.protocol === "http:" || url.protocol === "https:";
   return protocolOk && allowedHosts.some((host) => url.hostname.toLowerCase().endsWith(host));
@@ -106,11 +209,8 @@ const isAllowedUrl = (url: URL) => {
 const looksLikeBoilerplate = (text: string) => {
   const lower = text.toLowerCase();
   return (
-    lower.includes("by messaging chatgpt") ||
-    lower.includes("log in sign up for free") ||
-    lower.includes("terms of use") ||
-    lower.includes("privacy policy") ||
-    lower.length < 80
+    lower.length < 100 &&
+    (lower.includes("log in") || lower.includes("by messaging chatgpt") || lower.includes("sign up for free"))
   );
 };
 
@@ -229,6 +329,8 @@ export async function POST(request: Request) {
         }
 
         if (!isAllowedUrl(parsedUrl)) continue;
+        const host = parsedUrl.hostname.toLowerCase();
+        const isChatGptShare = host.endsWith("chatgpt.com") || host.endsWith("chat.openai.com");
 
         try {
           const res = await fetch(parsedUrl.toString(), {
@@ -239,12 +341,22 @@ export async function POST(request: Request) {
           });
           if (!res.ok) continue;
           const html = await res.text();
-          const extractedShare = extractChatGptShareText(html);
+          const { data: nextData, buildId } = isChatGptShare ? parseNextDataFromHtml(html) : { data: null, buildId: null };
+          const cookieHeader = isChatGptShare ? buildCookieHeader(res.headers.get("set-cookie")) : null;
+          let extractedShare = isChatGptShare ? extractChatGptShareTextFromData(nextData) : null;
+          if (!extractedShare && isChatGptShare) {
+            console.warn("ChatGPT share page missing embedded conversation, trying data endpoint", { url: rawUrl });
+            extractedShare = await fetchChatGptShareTextFromDataEndpoint(parsedUrl, buildId, cookieHeader);
+          }
+          if (!extractedShare && isChatGptShare) {
+            console.warn("ChatGPT share content unavailable after extraction attempts", { url: rawUrl });
+          }
           const extracted = extractedShare || extractTextFromHtml(html);
           if (extracted && extracted.length >= 50 && !looksLikeBoilerplate(extracted)) {
-            collected.push(extracted);
-            lengths.push(extracted.length);
-            perUrlMeta.push({ url: rawUrl, status: res.status, extractedLength: extracted.length });
+            const trimmed = extracted.trim();
+            collected.push(trimmed);
+            lengths.push(trimmed.length);
+            perUrlMeta.push({ url: rawUrl, status: res.status, extractedLength: trimmed.length });
           } else {
             perUrlMeta.push({
               url: rawUrl,
@@ -259,8 +371,26 @@ export async function POST(request: Request) {
         }
       }
 
+      if (collected.length === 0) {
+        await logAnalysisError({
+          clientId,
+          sourceMode: "url",
+          inputCharCount: 0,
+          errorCode: "url_boilerplate_or_empty",
+          message: "Share URL text looks like boilerplate/too short",
+          meta: {
+            shareUrls,
+            lengths,
+            sample: "",
+            perUrlMeta,
+            collectedCount: collected.length,
+          },
+        });
+        return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
+      }
+
       const combined = collected.join("\n\n---\n\n").trim();
-      if (!combined || combined.length < 50) {
+      if (!combined) {
         await logAnalysisError({
           clientId,
           sourceMode: "url",
