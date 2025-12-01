@@ -27,7 +27,15 @@ export async function GET(request: NextRequest) {
     },
   });
 
+  const shaped = logs.map((log) => {
+    const meta = log.meta as unknown as { shareUrls?: string[] } | null;
+    return {
+      ...log,
+      shareUrls: Array.isArray(meta?.shareUrls) ? meta?.shareUrls : [],
+    };
+  });
+
   const remaining = await prisma.analysisLog.count();
 
-  return NextResponse.json({ logs, total: remaining });
+  return NextResponse.json({ logs: shaped, total: remaining });
 }
