@@ -108,12 +108,12 @@ export default async function AdminProfilesPage({
                   <td className="px-4 py-3 text-slate-200">{profile.sourceMode}</td>
                   <td className="px-4 py-3 capitalize text-slate-200">{profile.confidence}</td>
                   <td className="px-4 py-3 text-slate-200">
-                    {typeof profile.inputCharCount === "number" ? `~${profile.inputCharCount}` : "—"}
+                    {typeof profile.inputCharCount === "number" ? `~${profile.inputCharCount}` : "-"}
                   </td>
                   <td className="px-4 py-3 text-slate-200">{profile.model}</td>
                   <td className="px-4 py-3 text-slate-200">{profile.promptVersion}</td>
                   <td className={`px-4 py-3 capitalize ${resonanceClass(profile.resonance)}`}>
-                    {profile.resonance ?? "—"}
+                    {profile.resonance ?? "-"}
                   </td>
                   <td className="px-4 py-3 text-slate-200">
                     {profile.resonance || profile.feedbackText ? "Yes" : "No"}
@@ -145,51 +145,55 @@ export default async function AdminProfilesPage({
             </tbody>
           </table>
         </div>
-      </div>
-      <div className="glass card-border space-y-3 rounded-3xl border border-white/10 bg-white/5 p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Recent errors</p>
-            <p className="muted text-sm">Latest failed analyses with reasons.</p>
+
+        <div className="glass card-border space-y-3 rounded-3xl border border-white/10 bg-white/5 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Recent errors</p>
+              <p className="muted text-sm">Latest failed analyses with reasons.</p>
+            </div>
+            <Link
+              href={requiredKey ? `/api/admin/analysis-logs?key=${requiredKey}` : "/api/admin/analysis-logs"}
+              className="text-emerald-200 underline"
+            >
+              Open JSON
+            </Link>
           </div>
-          <Link
-            href={requiredKey ? `/api/admin/analysis-logs?key=${requiredKey}` : "/api/admin/analysis-logs"}
-            className="text-emerald-200 underline"
-          >
-            Open JSON
-          </Link>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-white/5">
-          <table className="min-w-full text-left text-xs text-slate-100">
-            <thead className="bg-white/5 uppercase tracking-[0.08em] text-emerald-200">
-              <tr>
-                <th className="px-3 py-2">Time</th>
-                <th className="px-3 py-2">Source</th>
-                <th className="px-3 py-2">Chars</th>
-                <th className="px-3 py-2">Error</th>
-                <th className="px-3 py-2">Message</th>
-                <th className="px-3 py-2">Details</th>
-                <th className="px-3 py-2">Client</th>
+          <div className="overflow-hidden rounded-2xl border border-white/5">
+            <table className="min-w-full text-left text-xs text-slate-100">
+              <thead className="bg-white/5 uppercase tracking-[0.08em] text-emerald-200">
+                <tr>
+                  <th className="px-3 py-2">Time</th>
+                  <th className="px-3 py-2">Source</th>
+                  <th className="px-3 py-2">Chars</th>
+                  <th className="px-3 py-2">Error</th>
+                  <th className="px-3 py-2">Message</th>
+                  <th className="px-3 py-2">Details</th>
+                  <th className="px-3 py-2">Client</th>
                 </tr>
               </thead>
               <tbody>
-                {logs.map((log) => (
-                <tr key={log.id} className="border-t border-white/5">
-                  <td className="px-3 py-2 text-slate-200">{formatDate(log.createdAt)}</td>
-                  <td className="px-3 py-2 text-slate-200">{log.sourceMode ?? "-"}</td>
-                  <td className="px-3 py-2 text-slate-200">
-                    {typeof log.inputCharCount === "number" ? `~${log.inputCharCount}` : "-"}
-                  </td>
-                    <td className="px-3 py-2 text-amber-200">{log.errorCode ?? "-"}</td>
-                    <td className="px-3 py-2 text-slate-200 truncate max-w-[180px]" title={log.message ?? ""}>
-                      {log.message ?? "-"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-400 truncate max-w-[160px]" title={JSON.stringify(log.meta ?? {})}>
-                      {log.meta ? JSON.stringify(log.meta).slice(0, 80) + (JSON.stringify(log.meta).length > 80 ? "…" : "") : "-"}
-                    </td>
-                    <td className="px-3 py-2 text-slate-400">{log.clientId ?? "-"}</td>
-                  </tr>
-                ))}
+                {logs.map((log) => {
+                  const metaStr = JSON.stringify(log.meta ?? {});
+                  const truncatedMeta = metaStr.length > 100 ? `${metaStr.slice(0, 100)}…` : metaStr;
+                  return (
+                    <tr key={log.id} className="border-t border-white/5">
+                      <td className="px-3 py-2 text-slate-200">{formatDate(log.createdAt)}</td>
+                      <td className="px-3 py-2 text-slate-200">{log.sourceMode ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-200">
+                        {typeof log.inputCharCount === "number" ? `~${log.inputCharCount}` : "-"}
+                      </td>
+                      <td className="px-3 py-2 text-amber-200">{log.errorCode ?? "-"}</td>
+                      <td className="px-3 py-2 text-slate-200 truncate max-w-[180px]" title={log.message ?? ""}>
+                        {log.message ?? "-"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400 truncate max-w-[200px]" title={metaStr}>
+                        {log.meta ? truncatedMeta : "-"}
+                      </td>
+                      <td className="px-3 py-2 text-slate-400">{log.clientId ?? "-"}</td>
+                    </tr>
+                  );
+                })}
                 {logs.length === 0 && (
                   <tr>
                     <td className="px-3 py-3 text-slate-400" colSpan={7}>
@@ -198,7 +202,8 @@ export default async function AdminProfilesPage({
                   </tr>
                 )}
               </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       </div>
     </main>
