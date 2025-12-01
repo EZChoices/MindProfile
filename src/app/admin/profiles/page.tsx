@@ -174,6 +174,11 @@ export default async function AdminProfilesPage({
               </thead>
               <tbody>
                 {logs.map((log) => {
+                  const meta = (log.meta ?? {}) as { shareUrls?: string[] };
+                  const urls =
+                    meta && Array.isArray(meta.shareUrls)
+                      ? meta.shareUrls.filter((u) => typeof u === "string" && u.trim().length > 0)
+                      : [];
                   const metaStr = JSON.stringify(log.meta ?? {});
                   const truncatedMeta = metaStr.length > 100 ? `${metaStr.slice(0, 100)}…` : metaStr;
                   return (
@@ -188,7 +193,22 @@ export default async function AdminProfilesPage({
                         {log.message ?? "-"}
                       </td>
                       <td className="px-3 py-2 text-slate-400 truncate max-w-[200px]" title={metaStr}>
-                        {log.meta ? truncatedMeta : "-"}
+                        {urls.length > 0 ? (
+                          <span className="flex flex-wrap gap-1">
+                            {urls.map((u, i) => (
+                              <span key={`${log.id}-url-${i}`} className="flex items-center gap-1">
+                                {i > 0 && <span>,</span>}
+                                <a href={u} className="text-emerald-200 underline" target="_blank" rel="noreferrer">
+                                  link {i + 1}
+                                </a>
+                              </span>
+                            ))}
+                          </span>
+                        ) : log.meta ? (
+                          truncatedMeta
+                        ) : (
+                          "-"
+                        )}
                       </td>
                       <td className="px-3 py-2 text-slate-400">{log.clientId ?? "-"}</td>
                     </tr>
