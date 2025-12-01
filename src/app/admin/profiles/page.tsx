@@ -165,11 +165,11 @@ export default async function AdminProfilesPage({
               <tr>
                 <th className="px-3 py-2">Time</th>
                 <th className="px-3 py-2">Source</th>
-                  <th className="px-3 py-2">Chars</th>
-                  <th className="px-3 py-2">Error</th>
-                  <th className="px-3 py-2">Message</th>
-                  <th className="px-3 py-2">Meta</th>
-                  <th className="px-3 py-2">Client</th>
+                <th className="px-3 py-2">Chars</th>
+                <th className="px-3 py-2">Error</th>
+                <th className="px-3 py-2">Message</th>
+                <th className="px-3 py-2">Details</th>
+                <th className="px-3 py-2">Client</th>
                 </tr>
               </thead>
               <tbody>
