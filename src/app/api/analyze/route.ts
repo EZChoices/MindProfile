@@ -134,6 +134,12 @@ export async function POST(request: Request) {
         : [];
 
       if (shareUrls.length === 0) {
+        await logAnalysisError({
+          clientId,
+          sourceMode: "url",
+          errorCode: "no_urls",
+          message: "No share URLs provided",
+        });
         return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
       }
 
@@ -178,6 +184,7 @@ export async function POST(request: Request) {
             shareUrls,
             lengths,
             sample: combined.slice(0, 200),
+            collectedCount: collected.length,
           },
         });
         return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
