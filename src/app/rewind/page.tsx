@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getOrCreateClientId } from "@/lib/clientId";
 import type { RewindSummary } from "@/lib/rewind";
+import { analyzeRewindFileClient } from "@/lib/rewindFileClient";
+import type { RewindClientProgress } from "@/lib/rewindFileClient";
 
 const errorMessages: Record<string, string> = {
   no_file: "Please select your ChatGPT export file.",
@@ -27,6 +29,7 @@ export default function RewindPage() {
   const [debugDetails, setDebugDetails] = useState<string | null>(null);
   const [showDebug, setShowDebug] = useState(false);
   const [rewind, setRewind] = useState<RewindSummary | null>(null);
+  const [clientProgress, setClientProgress] = useState<RewindClientProgress | null>(null);
 
   const [debugEnabled, setDebugEnabled] = useState(false);
 
@@ -43,13 +46,17 @@ export default function RewindPage() {
     setDebugDetails(null);
     setShowDebug(false);
     setRewind(null);
+    setClientProgress(null);
   };
+
+  const shouldProcessLocally = (candidate: File) => candidate.size > 4 * 1024 * 1024;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setApiError(null);
     setDebugDetails(null);
     setShowDebug(false);
+    setClientProgress(null);
 
     if (!file) {
       setApiError(errorMessages.no_file);
@@ -65,6 +72,25 @@ export default function RewindPage() {
     setLoading(true);
     try {
       const clientId = getOrCreateClientId();
+
+      const processLocally = async () => {
+        const summary = await analyzeRewindFileClient(file, (p) => setClientProgress(p));
+        setRewind(summary);
+        try {
+          await fetch("/api/rewind/store", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ clientId, rewind: summary, year: new Date().getFullYear() }),
+          });
+        } catch (err) {
+          console.warn("Failed to persist rewind summary", err);
+        }
+      };
+
+      if (shouldProcessLocally(file)) {
+        await processLocally();
+        return;
+      }
       const formData = new FormData();
       formData.append("file", file);
       formData.append("clientId", clientId);
@@ -79,11 +105,11 @@ export default function RewindPage() {
       if (!contentType.toLowerCase().includes("application/json")) {
         const text = await res.text();
         setDebugDetails(`HTTP ${res.status} ${res.statusText}\n${text.slice(0, 800)}`);
-        setApiError(
-          res.status === 413
-            ? "That export is too large to upload in one go."
-            : errorMessages.analysis_failed,
-        );
+        if (res.status === 403 || res.status === 413) {
+          await processLocally();
+          return;
+        }
+        setApiError(errorMessages.analysis_failed);
         return;
       }
 
@@ -119,6 +145,7 @@ export default function RewindPage() {
     setApiError(null);
     setDebugDetails(null);
     setShowDebug(false);
+    setClientProgress(null);
   };
 
   return (
@@ -178,6 +205,38 @@ export default function RewindPage() {
                       </pre>
                     )}
                   </div>
+                )}
+              </div>
+            )}
+
+            {clientProgress && (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                  Processing on this device
+                </div>
+                <p className="muted mt-2 text-xs">
+                  Nothing is uploaded. Big exports can take a minute.
+                </p>
+                <div className="mt-3 flex items-center justify-between text-xs text-slate-200">
+                  <span className="muted">
+                    {clientProgress.phase === "unzipping"
+                      ? "Unzipping..."
+                      : clientProgress.phase === "parsing"
+                        ? "Reading chats..."
+                        : clientProgress.phase === "reading"
+                          ? "Loading..."
+                          : "Almost done..."}
+                  </span>
+                  <span className="muted">
+                    {clientProgress.totalBytes > 0
+                      ? `${Math.round((clientProgress.bytesRead / clientProgress.totalBytes) * 100)}%`
+                      : ""}
+                  </span>
+                </div>
+                {clientProgress.conversationsProcessed > 0 && (
+                  <p className="muted mt-2 text-xs">
+                    Conversations scanned: {clientProgress.conversationsProcessed.toLocaleString()}
+                  </p>
                 )}
               </div>
             )}
