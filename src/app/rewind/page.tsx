@@ -24,18 +24,26 @@ export default function RewindPage() {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
+  const [debugDetails, setDebugDetails] = useState<string | null>(null);
+  const [showDebug, setShowDebug] = useState(false);
   const [rewind, setRewind] = useState<RewindSummary | null>(null);
+
+  const isDev = process.env.NODE_ENV !== "production";
 
   const handleFileChange = (next: FileList | null) => {
     const chosen = next?.[0] ?? null;
     setFile(chosen);
     setApiError(null);
+    setDebugDetails(null);
+    setShowDebug(false);
     setRewind(null);
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setApiError(null);
+    setDebugDetails(null);
+    setShowDebug(false);
 
     if (!file) {
       setApiError(errorMessages.no_file);
@@ -56,10 +64,27 @@ export default function RewindPage() {
       formData.append("clientId", clientId);
 
       const res = await fetch("/api/rewind", { method: "POST", body: formData });
-      const data = (await res.json()) as { rewind?: RewindSummary; error?: string };
+      const contentType = res.headers.get("content-type") || "";
+
+      if (!contentType.toLowerCase().includes("application/json")) {
+        const text = await res.text();
+        setDebugDetails(`HTTP ${res.status} ${res.statusText}\n${text.slice(0, 800)}`);
+        setApiError(
+          res.status === 413
+            ? "That export is too large to upload in one go."
+            : errorMessages.analysis_failed,
+        );
+        return;
+      }
+
+      const data = (await res.json()) as { rewind?: RewindSummary; error?: string; message?: string };
 
       if (!res.ok || !data.rewind) {
         setApiError(errorMessages[data.error || "analysis_failed"] || errorMessages.analysis_failed);
+        if (isDev) {
+          const debug = data?.message || `HTTP ${res.status} ${data?.error || "unknown_error"}`;
+          setDebugDetails(debug);
+        }
         return;
       }
 
@@ -67,6 +92,7 @@ export default function RewindPage() {
     } catch (err) {
       console.error("Rewind upload failed", err);
       setApiError(errorMessages.analysis_failed);
+      setDebugDetails(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
@@ -76,6 +102,8 @@ export default function RewindPage() {
     setFile(null);
     setRewind(null);
     setApiError(null);
+    setDebugDetails(null);
+    setShowDebug(false);
   };
 
   return (
@@ -117,7 +145,27 @@ export default function RewindPage() {
               />
             </label>
 
-            {apiError && <p className="text-sm text-rose-200">{apiError}</p>}
+            {apiError && (
+              <div className="space-y-2">
+                <p className="text-sm text-rose-200">{apiError}</p>
+                {isDev && debugDetails && (
+                  <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
+                    <button
+                      type="button"
+                      onClick={() => setShowDebug((v) => !v)}
+                      className="text-xs font-semibold text-emerald-200 underline"
+                    >
+                      {showDebug ? "Hide details" : "Show details"}
+                    </button>
+                    {showDebug && (
+                      <pre className="mt-2 whitespace-pre-wrap text-[11px] leading-relaxed text-slate-200">
+                        {debugDetails}
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               <button
@@ -248,4 +296,3 @@ export default function RewindPage() {
     </main>
   );
 }
-

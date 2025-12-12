@@ -110,6 +110,17 @@ const STOPWORDS = new Set([
   "all",
 ]);
 
+const HABIT_PHRASES: Array<{ phrase: string; pattern: RegExp }> = [
+  { phrase: "thank you", pattern: /\bthanks\b|\bthank you\b/gi },
+  { phrase: "please", pattern: /\bplease\b/gi },
+  { phrase: "quick question", pattern: /\bquick question\b/gi },
+  { phrase: "step by step", pattern: /\bstep by step\b/gi },
+  { phrase: "one more thing", pattern: /\bone more (thing)?\b/gi },
+  { phrase: "what about", pattern: /\bwhat about\b/gi },
+  { phrase: "can you", pattern: /\bcan you\b/gi },
+  { phrase: "explain like I’m 5", pattern: /\bexplain (it )?like (i'?m|i am) (5|five)\b/gi },
+];
+
 const TOPIC_BUCKETS: Array<{
   key: string;
   label: string;
@@ -207,12 +218,6 @@ const parseTimestamp = (value: unknown): Date | null => {
 const asRecord = (value: unknown): Record<string, unknown> | null =>
   value && typeof value === "object" ? (value as Record<string, unknown>) : null;
 
-const readCreateTime = (message: unknown): number => {
-  const record = asRecord(message);
-  const raw = record?.create_time ?? asRecord(record?.message)?.create_time;
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
-};
-
 const normalizeMessageContent = (message: unknown): string | null => {
   const msg = asRecord(message);
   if (!msg) return null;
@@ -247,7 +252,6 @@ const extractConversationMessages = (conversation: unknown): unknown[] => {
     const mapped = Object.values(mapping)
       .map((node) => asRecord(node)?.message)
       .filter(Boolean);
-    mapped.sort((a, b) => readCreateTime(a) - readCreateTime(b));
     return mapped;
   }
 
@@ -255,20 +259,66 @@ const extractConversationMessages = (conversation: unknown): unknown[] => {
   return Array.isArray(directMessages) ? directMessages : [];
 };
 
-export function analyzeChatExport(conversations: unknown[]): RewindSummary {
-  const totalConversations = conversations.length;
+const countMatches = (text: string, pattern: RegExp) => {
+  pattern.lastIndex = 0;
+  let count = 0;
+  while (pattern.exec(text)) count += 1;
+  return count;
+};
 
-  const userMessages: Array<{ text: string; createdAt: Date | null }> = [];
-  const perConversationText: string[] = [];
+const tokenize = (textLower: string): string[] =>
+  textLower.split(/[^a-z0-9'\-]+/).filter(Boolean);
 
-  for (const conv of conversations) {
-    const convRecord = asRecord(conv);
-    if (!convRecord) continue;
+export interface RewindAnalyzer {
+  addConversation: (conversation: unknown) => void;
+  summary: () => RewindSummary;
+}
+
+export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }): RewindAnalyzer {
+  const now = options?.now ?? new Date();
+  const daysBack = options?.daysBack ?? 365;
+  const nowMs = now.getTime();
+  const sinceMs = nowMs - daysBack * 24 * 60 * 60 * 1000;
+  const midMs = sinceMs + Math.floor((nowMs - sinceMs) / 2);
+
+  let totalConversations = 0;
+  let totalUserMessages = 0;
+
+  const activeDaysSet = new Set<string>();
+  const monthCount = new Map<string, number>();
+  const hourCount = Array.from({ length: 24 }, () => 0);
+  let timestampCount = 0;
+  let lateNightCount = 0;
+
+  const topicCounts = new Map<string, number>();
+  const wordFreq = new Map<string, number>();
+  const habitCounts = new Map<string, number>();
+
+  let longestPromptChars = 0;
+  let totalPromptChars = 0;
+
+  let earlyPromptChars = 0;
+  let earlyPromptCount = 0;
+  let latePromptChars = 0;
+  let latePromptCount = 0;
+
+  const addConversation = (conversation: unknown) => {
+    const convRecord = asRecord(conversation);
+    if (!convRecord) return;
 
     const titleRaw = convRecord.title;
     const title = typeof titleRaw === "string" ? titleRaw : "";
+    const titleLower = title.toLowerCase();
+
+    const matchedTopics = new Set<string>();
+    for (const bucket of TOPIC_BUCKETS) {
+      if (bucket.keywords.some((kw) => titleLower.includes(kw))) {
+        matchedTopics.add(bucket.key);
+      }
+    }
+
     const messages = extractConversationMessages(convRecord);
-    const convoParts: string[] = [];
+    let conversationHasIncluded = false;
 
     for (const msg of messages) {
       const msgRecord = asRecord(msg);
@@ -286,6 +336,14 @@ export function analyzeChatExport(conversations: unknown[]): RewindSummary {
         null;
       if (roleRaw !== "user") continue;
 
+      const createdAt =
+        parseTimestamp(msgRecord.create_time) ??
+        parseTimestamp(nestedMessageRecord?.create_time) ??
+        parseTimestamp(convRecord.create_time) ??
+        null;
+
+      if (createdAt && createdAt.getTime() < sinceMs) continue;
+
       const rawText = normalizeMessageContent(msgRecord);
       if (!rawText) continue;
 
@@ -293,178 +351,155 @@ export function analyzeChatExport(conversations: unknown[]): RewindSummary {
       const trimmed = sanitized.trim();
       if (!trimmed.length) continue;
 
-      const createdAt =
-        parseTimestamp(msgRecord.create_time) ??
-        parseTimestamp(nestedMessageRecord?.create_time) ??
-        parseTimestamp(convRecord.create_time) ??
-        null;
+      conversationHasIncluded = true;
+      totalUserMessages += 1;
 
-      userMessages.push({ text: trimmed, createdAt });
-      convoParts.push(trimmed);
-    }
+      const len = trimmed.length;
+      totalPromptChars += len;
+      if (len > longestPromptChars) longestPromptChars = len;
 
-    const convoText = `${title}\n${convoParts.join("\n")}`.trim();
-    if (convoText.length) perConversationText.push(convoText.toLowerCase());
-  }
+      const lowered = trimmed.toLowerCase();
 
-  const totalUserMessages = userMessages.length;
+      // Topics (only check buckets not already hit this conversation)
+      for (const bucket of TOPIC_BUCKETS) {
+        if (matchedTopics.has(bucket.key)) continue;
+        if (bucket.keywords.some((kw) => lowered.includes(kw))) {
+          matchedTopics.add(bucket.key);
+        }
+      }
 
-  const wordFreq = new Map<string, number>();
-  const bigramFreq = new Map<string, number>();
-  let longestPromptChars = 0;
-  let totalPromptChars = 0;
+      // Fun phrases / habits
+      for (const habit of HABIT_PHRASES) {
+        const hits = countMatches(lowered, habit.pattern);
+        if (hits > 0) {
+          habitCounts.set(habit.phrase, (habitCounts.get(habit.phrase) ?? 0) + hits);
+        }
+      }
 
-  const timestamps: Date[] = [];
+      // Word frequencies
+      const tokens = tokenize(lowered);
+      for (const token of tokens) {
+        if (token.startsWith("[")) continue;
+        if (token.length < 3) continue;
+        if (STOPWORDS.has(token)) continue;
+        if (/^\d+$/.test(token)) continue;
+        wordFreq.set(token, (wordFreq.get(token) ?? 0) + 1);
+      }
 
-  for (const msg of userMessages) {
-    const lowered = msg.text.toLowerCase();
-    const tokens = lowered.split(/[^a-z0-9'\-]+/).filter(Boolean);
+      // Time stats
+      if (createdAt) {
+        timestampCount += 1;
+        const dayKey = createdAt.toISOString().slice(0, 10);
+        activeDaysSet.add(dayKey);
 
-    for (const token of tokens) {
-      if (token.startsWith("[")) continue;
-      if (token.length < 3) continue;
-      if (STOPWORDS.has(token)) continue;
-      if (/^\d+$/.test(token)) continue;
-      wordFreq.set(token, (wordFreq.get(token) ?? 0) + 1);
-    }
+        const monthKey = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
+        monthCount.set(monthKey, (monthCount.get(monthKey) ?? 0) + 1);
 
-    for (let i = 0; i < tokens.length - 1; i++) {
-      const a = tokens[i];
-      const b = tokens[i + 1];
-      if (!a || !b) continue;
-      if (a.startsWith("[") || b.startsWith("[")) continue;
-      const phrase = `${a} ${b}`;
-      if (phrase.length > 40) continue;
-      bigramFreq.set(phrase, (bigramFreq.get(phrase) ?? 0) + 1);
-    }
+        const hour = createdAt.getHours();
+        hourCount[hour] += 1;
+        if (hour >= 23 || hour <= 4) lateNightCount += 1;
 
-    const len = msg.text.length;
-    totalPromptChars += len;
-    if (len > longestPromptChars) longestPromptChars = len;
-
-    if (msg.createdAt) timestamps.push(msg.createdAt);
-  }
-
-  const avgPromptChars =
-    totalUserMessages > 0 ? Math.round(totalPromptChars / totalUserMessages) : null;
-
-  const topWord =
-    Array.from(wordFreq.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-
-  const frequentPhrases = Array.from(bigramFreq.entries())
-    .filter(([phrase, count]) => {
-      if (count < 5) return false;
-      const [a, b] = phrase.split(" ");
-      if (!a || !b) return false;
-      if (STOPWORDS.has(a) && STOPWORDS.has(b)) return false;
-      return true;
-    })
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([phrase, count]) => ({ phrase, count }));
-
-  const topicCounts = new Map<string, number>();
-  for (const text of perConversationText) {
-    for (const bucket of TOPIC_BUCKETS) {
-      if (bucket.keywords.some((kw) => text.includes(kw))) {
-        topicCounts.set(bucket.key, (topicCounts.get(bucket.key) ?? 0) + 1);
+        if (createdAt.getTime() <= midMs) {
+          earlyPromptChars += len;
+          earlyPromptCount += 1;
+        } else {
+          latePromptChars += len;
+          latePromptCount += 1;
+        }
       }
     }
-  }
 
-  let topTopics: TopicInsight[] = TOPIC_BUCKETS.map((bucket) => ({
-    key: bucket.key,
-    label: bucket.label,
-    emoji: bucket.emoji,
-    count: topicCounts.get(bucket.key) ?? 0,
-  }))
-    .filter((t) => t.count > 0)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
+    if (!conversationHasIncluded) return;
 
-  if (topTopics.length === 0) {
-    const fallbackWords = Array.from(wordFreq.entries())
+    totalConversations += 1;
+    for (const key of matchedTopics) {
+      topicCounts.set(key, (topicCounts.get(key) ?? 0) + 1);
+    }
+  };
+
+  const summary = (): RewindSummary => {
+    const avgPromptChars =
+      totalUserMessages > 0 ? Math.round(totalPromptChars / totalUserMessages) : null;
+
+    const topWord =
+      Array.from(wordFreq.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+
+    const frequentPhrases = Array.from(habitCounts.entries())
+      .filter(([, count]) => count >= 5)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([word, count]) => ({
-        key: word,
-        label: word.charAt(0).toUpperCase() + word.slice(1),
-        emoji: "✨",
-        count,
-      }));
-    topTopics = fallbackWords;
-  }
+      .slice(0, 5)
+      .map(([phrase, count]) => ({ phrase, count }));
 
-  // Usage stats
-  const activeDaysSet = new Set<string>();
-  const monthCount = new Map<string, number>();
-  const hourCount = Array.from({ length: 24 }, () => 0);
-  let lateNightCount = 0;
+    let topTopics: TopicInsight[] = TOPIC_BUCKETS.map((bucket) => ({
+      key: bucket.key,
+      label: bucket.label,
+      emoji: bucket.emoji,
+      count: topicCounts.get(bucket.key) ?? 0,
+    }))
+      .filter((t) => t.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
 
-  const sortedTimestamps = timestamps.sort((a, b) => a.getTime() - b.getTime());
+    if (topTopics.length === 0) {
+      const fallbackWords = Array.from(wordFreq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([word, count]) => ({
+          key: word,
+          label: word.charAt(0).toUpperCase() + word.slice(1),
+          emoji: "✨",
+          count,
+        }));
+      topTopics = fallbackWords;
+    }
 
-  for (const d of sortedTimestamps) {
-    const dayKey = d.toISOString().slice(0, 10);
-    activeDaysSet.add(dayKey);
+    const busiestMonthKey =
+      Array.from(monthCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const busiestMonth =
+      busiestMonthKey && /^\d{4}-\d{2}$/.test(busiestMonthKey)
+        ? monthNames[Number(busiestMonthKey.split("-")[1]) - 1] ?? null
+        : null;
 
-    const monthKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    monthCount.set(monthKey, (monthCount.get(monthKey) ?? 0) + 1);
-
-    const hour = d.getHours();
-    hourCount[hour] += 1;
-    if (hour >= 23 || hour <= 4) lateNightCount += 1;
-  }
-
-  const activeDays = activeDaysSet.size;
-  const busiestMonthKey =
-    Array.from(monthCount.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  const busiestMonth =
-    busiestMonthKey && /^\d{4}-\d{2}$/.test(busiestMonthKey)
-      ? monthNames[Number(busiestMonthKey.split("-")[1]) - 1] ?? null
+    const peakHour = hourCount.some((c) => c > 0)
+      ? hourCount.reduce((best, count, hour) => (count > hourCount[best] ? hour : best), 0)
       : null;
 
-  const peakHour = hourCount.some((c) => c > 0)
-    ? hourCount.reduce((best, count, hour) => (count > hourCount[best] ? hour : best), 0)
-    : null;
+    const lateNightPercent =
+      timestampCount > 0 ? Math.round((lateNightCount / timestampCount) * 100) : 0;
 
-  const lateNightPercent =
-    sortedTimestamps.length > 0
-      ? Math.round((lateNightCount / sortedTimestamps.length) * 100)
-      : 0;
-
-  // Prompt length change (early vs late)
-  let promptLengthChangePercent: number | null = null;
-  if (sortedTimestamps.length >= 10) {
-    const byTime = userMessages
-      .filter((m) => m.createdAt)
-      .sort((a, b) => (a.createdAt!.getTime() - b.createdAt!.getTime()));
-    const mid = Math.floor(byTime.length / 2);
-    const early = byTime.slice(0, mid);
-    const late = byTime.slice(mid);
-    const avgEarly =
-      early.reduce((acc, m) => acc + m.text.length, 0) / Math.max(1, early.length);
-    const avgLate =
-      late.reduce((acc, m) => acc + m.text.length, 0) / Math.max(1, late.length);
-    if (avgEarly > 0) {
-      const diff = ((avgLate - avgEarly) / avgEarly) * 100;
-      if (Math.abs(diff) >= 10) {
-        promptLengthChangePercent = Math.round(diff);
+    let promptLengthChangePercent: number | null = null;
+    if (earlyPromptCount >= 5 && latePromptCount >= 5) {
+      const avgEarly = earlyPromptChars / earlyPromptCount;
+      const avgLate = latePromptChars / latePromptCount;
+      if (avgEarly > 0) {
+        const diff = ((avgLate - avgEarly) / avgEarly) * 100;
+        if (Number.isFinite(diff) && Math.abs(diff) >= 10) {
+          promptLengthChangePercent = Math.round(diff);
+        }
       }
     }
-  }
 
-  return {
-    totalConversations,
-    totalUserMessages,
-    activeDays,
-    busiestMonth,
-    peakHour,
-    lateNightPercent,
-    topTopics,
-    frequentPhrases,
-    topWord,
-    longestPromptChars: totalUserMessages > 0 ? longestPromptChars : null,
-    avgPromptChars,
-    promptLengthChangePercent,
+    return {
+      totalConversations,
+      totalUserMessages,
+      activeDays: activeDaysSet.size,
+      busiestMonth,
+      peakHour,
+      lateNightPercent,
+      topTopics,
+      frequentPhrases,
+      topWord,
+      longestPromptChars: totalUserMessages > 0 ? longestPromptChars : null,
+      avgPromptChars,
+      promptLengthChangePercent,
+    };
   };
+
+  return { addConversation, summary };
+}
+
+export function analyzeChatExport(conversations: unknown[], options?: { now?: Date; daysBack?: number }): RewindSummary {
+  const analyzer = createRewindAnalyzer(options);
+  for (const conv of conversations) analyzer.addConversation(conv);
+  return analyzer.summary();
 }
