@@ -224,11 +224,12 @@ export default function RewindPage() {
                       : clientProgress.phase === "parsing"
                         ? "Reading chats..."
                         : clientProgress.phase === "reading"
-                          ? "Loading..."
+                          ? "Reading file..."
                           : "Almost done..."}
                   </span>
                   <span className="muted">
-                    {clientProgress.totalBytes > 0
+                    {(clientProgress.phase === "unzipping" || clientProgress.phase === "reading") &&
+                    clientProgress.totalBytes > 0
                       ? `${Math.round((clientProgress.bytesRead / clientProgress.totalBytes) * 100)}%`
                       : ""}
                   </span>

@@ -14,8 +14,10 @@ export interface RewindClientProgress {
 class AsyncByteQueue {
   private queue: Uint8Array[] = [];
   private resolvers: Array<(value: IteratorResult<Uint8Array>) => void> = [];
+  private drainWaiters: Array<{ maxBytes: number; resolve: () => void }> = [];
   private closed = false;
   private error: unknown = null;
+  private queuedBytes = 0;
 
   push(chunk: Uint8Array) {
     if (this.closed || this.error) return;
@@ -24,6 +26,7 @@ class AsyncByteQueue {
       resolver({ value: chunk, done: false });
       return;
     }
+    this.queuedBytes += chunk.byteLength;
     this.queue.push(chunk);
   }
 
@@ -34,6 +37,7 @@ class AsyncByteQueue {
       const resolver = this.resolvers.shift();
       if (resolver) resolver({ value: undefined as unknown as Uint8Array, done: true });
     }
+    this.flushDrainWaiters();
   }
 
   fail(error: unknown) {
@@ -41,8 +45,35 @@ class AsyncByteQueue {
     this.error = error;
     while (this.resolvers.length) {
       const resolver = this.resolvers.shift();
-      if (resolver) resolver(Promise.reject(error) as unknown as IteratorResult<Uint8Array>);
+      if (resolver) resolver({ value: undefined as unknown as Uint8Array, done: true });
     }
+    this.flushDrainWaiters();
+  }
+
+  waitForBelow(maxBytes: number) {
+    if (this.closed || this.error) return Promise.resolve();
+    if (this.queuedBytes <= maxBytes) return Promise.resolve();
+    return new Promise<void>((resolve) => this.drainWaiters.push({ maxBytes, resolve }));
+  }
+
+  private flushDrainWaiters() {
+    if (!this.drainWaiters.length) return;
+    const waiters = this.drainWaiters;
+    this.drainWaiters = [];
+    waiters.forEach((w) => w.resolve());
+  }
+
+  private notifyDrain() {
+    if (!this.drainWaiters.length) return;
+    const remaining: typeof this.drainWaiters = [];
+    for (const waiter of this.drainWaiters) {
+      if (this.queuedBytes <= waiter.maxBytes) {
+        waiter.resolve();
+      } else {
+        remaining.push(waiter);
+      }
+    }
+    this.drainWaiters = remaining;
   }
 
   async *iterate(): AsyncGenerator<Uint8Array> {
@@ -50,11 +81,14 @@ class AsyncByteQueue {
       if (this.error) throw this.error;
       const next = this.queue.shift();
       if (next) {
+        this.queuedBytes = Math.max(0, this.queuedBytes - next.byteLength);
+        this.notifyDrain();
         yield next;
         continue;
       }
       if (this.closed) return;
       const chunk = await new Promise<IteratorResult<Uint8Array>>((resolve) => this.resolvers.push(resolve));
+      if (this.error) throw this.error;
       if (chunk.done) return;
       yield chunk.value;
     }
@@ -88,9 +122,11 @@ const parseJsonArrayStream = async (
   let conversationsProcessed = 0;
 
   const maybeYield = async () => {
-    if (conversationsProcessed % 25 === 0) {
+    if (conversationsProcessed <= 10 || conversationsProcessed % 25 === 0) {
       onProgress({ conversationsProcessed });
-      await new Promise<void>((r) => setTimeout(r, 0));
+      if (conversationsProcessed % 25 === 0) {
+        await new Promise<void>((r) => setTimeout(r, 0));
+      }
     }
   };
 
@@ -162,14 +198,15 @@ const parseJsonArrayStream = async (
   onProgress({ conversationsProcessed });
 };
 
-const conversationsJsonBytesFromZip = async (
+const conversationsJsonBytesFromZip = (
   file: File,
   onProgress: (progress: { bytesRead: number }) => void,
-): Promise<AsyncIterable<Uint8Array>> => {
+): AsyncIterable<Uint8Array> => {
   const queue = new AsyncByteQueue();
   let bytesRead = 0;
   let found = false;
   let resolved = false;
+  let doneEarly = false;
 
   const unzip = new Unzip((entry) => {
     const name = (entry.name || "").toLowerCase();
@@ -186,21 +223,49 @@ const conversationsJsonBytesFromZip = async (
       }
       if (isTarget && final && !resolved) {
         resolved = true;
+        doneEarly = true;
         queue.close();
       }
     };
   });
 
-  for await (const chunk of readWebStream(file.stream())) {
-    bytesRead += chunk.byteLength;
-    onProgress({ bytesRead });
-    unzip.push(chunk, false);
-  }
-  unzip.push(new Uint8Array(), true);
+  void (async () => {
+    try {
+      const reader = file.stream().getReader();
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (!value) continue;
+          bytesRead += value.byteLength;
+          onProgress({ bytesRead });
+          unzip.push(value, false);
+          if (doneEarly) {
+            await reader.cancel();
+            break;
+          }
+          await queue.waitForBelow(16 * 1024 * 1024);
+        }
+      } finally {
+        reader.releaseLock();
+      }
 
-  if (!found) {
-    queue.fail(new Error("conversations.json not found in ZIP"));
-  }
+      if (!doneEarly) {
+        unzip.push(new Uint8Array(), true);
+      }
+
+      if (!found) {
+        queue.fail(new Error("conversations.json not found in ZIP"));
+        return;
+      }
+
+      if (found && !resolved) {
+        queue.fail(new Error("conversations.json could not be read"));
+      }
+    } catch (error) {
+      queue.fail(error);
+    }
+  })();
 
   return queue.iterate();
 };
@@ -212,8 +277,9 @@ export async function analyzeRewindFileClient(
   const totalBytes = file.size || 0;
   let bytesRead = 0;
   let conversationsProcessed = 0;
+  let phase: RewindClientPhase = "reading";
 
-  const report = (phase: RewindClientPhase) => {
+  const report = () => {
     onProgress?.({ phase, bytesRead, totalBytes, conversationsProcessed });
   };
 
@@ -223,23 +289,31 @@ export async function analyzeRewindFileClient(
 
   const updateConversations = (p: { conversationsProcessed: number }) => {
     conversationsProcessed = p.conversationsProcessed;
-    report("parsing");
+    if (phase === "unzipping" && conversationsProcessed > 0) {
+      phase = "parsing";
+    }
+    report();
   };
 
   const lowerName = file.name.toLowerCase();
   if (lowerName.endsWith(".zip")) {
-    report("unzipping");
-    const bytes = await conversationsJsonBytesFromZip(file, (p) => {
+    phase = "unzipping";
+    report();
+    const bytes = conversationsJsonBytesFromZip(file, (p) => {
       bytesRead = p.bytesRead;
-      report("unzipping");
+      if (phase === "unzipping" && totalBytes > 0 && bytesRead >= totalBytes) {
+        phase = "parsing";
+      }
+      report();
     });
     await parseJsonArrayStream(bytes, addConversation, updateConversations);
   } else if (lowerName.endsWith(".json")) {
-    report("reading");
+    phase = "reading";
+    report();
     const bytes = (async function* () {
       for await (const chunk of readWebStream(file.stream())) {
         bytesRead += chunk.byteLength;
-        report("reading");
+        report();
         yield chunk;
       }
     })();
@@ -248,7 +322,7 @@ export async function analyzeRewindFileClient(
     throw new Error("Unsupported file type");
   }
 
-  report("done");
+  phase = "done";
+  report();
   return analyzer.summary();
 }
-
