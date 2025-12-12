@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getOrCreateClientId } from "@/lib/clientId";
 import type { RewindSummary } from "@/lib/rewind";
@@ -28,7 +28,13 @@ export default function RewindPage() {
   const [showDebug, setShowDebug] = useState(false);
   const [rewind, setRewind] = useState<RewindSummary | null>(null);
 
-  const isDev = process.env.NODE_ENV !== "production";
+  const [debugEnabled, setDebugEnabled] = useState(false);
+
+  useEffect(() => {
+    const flag = process.env.NEXT_PUBLIC_REWIND_DEBUG === "1";
+    const query = new URLSearchParams(window.location.search);
+    setDebugEnabled(flag || query.get("debug") === "1" || process.env.NODE_ENV !== "production");
+  }, []);
 
   const handleFileChange = (next: FileList | null) => {
     const chosen = next?.[0] ?? null;
@@ -63,7 +69,11 @@ export default function RewindPage() {
       formData.append("file", file);
       formData.append("clientId", clientId);
 
-      const res = await fetch("/api/rewind", { method: "POST", body: formData });
+      const res = await fetch("/api/rewind", {
+        method: "POST",
+        body: formData,
+        headers: debugEnabled ? { "x-rewind-debug": "1" } : undefined,
+      });
       const contentType = res.headers.get("content-type") || "";
 
       if (!contentType.toLowerCase().includes("application/json")) {
@@ -81,7 +91,7 @@ export default function RewindPage() {
 
       if (!res.ok || !data.rewind) {
         setApiError(errorMessages[data.error || "analysis_failed"] || errorMessages.analysis_failed);
-        if (isDev) {
+        if (debugEnabled) {
           const debug = data?.message || `HTTP ${res.status} ${data?.error || "unknown_error"}`;
           setDebugDetails(debug);
         }
@@ -91,7 +101,12 @@ export default function RewindPage() {
       setRewind(data.rewind);
     } catch (err) {
       console.error("Rewind upload failed", err);
-      setApiError(errorMessages.analysis_failed);
+      const message = err instanceof Error ? err.message : String(err);
+      if (file.size > 25 * 1024 * 1024) {
+        setApiError("Upload failed — this export may be too large for this deployment.");
+      } else {
+        setApiError(errorMessages.analysis_failed);
+      }
       setDebugDetails(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
@@ -148,7 +163,7 @@ export default function RewindPage() {
             {apiError && (
               <div className="space-y-2">
                 <p className="text-sm text-rose-200">{apiError}</p>
-                {isDev && debugDetails && (
+                {debugEnabled && debugDetails && (
                   <div className="rounded-2xl border border-white/10 bg-black/30 p-3">
                     <button
                       type="button"

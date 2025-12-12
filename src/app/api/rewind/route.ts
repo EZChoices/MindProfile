@@ -39,14 +39,21 @@ const analyzeZipStream = async (zipStream: NodeJS.ReadableStream) => {
 export async function POST(request: Request) {
   let clientId: string | null = null;
   try {
+    const debug = request.headers.get("x-rewind-debug") === "1" || process.env.NODE_ENV !== "production";
     const contentType = request.headers.get("content-type") || "";
     if (!contentType.toLowerCase().includes("multipart/form-data")) {
-      return NextResponse.json({ error: "invalid_input" }, { status: 400 });
+      return NextResponse.json(
+        debug ? { error: "invalid_input", message: "Expected multipart/form-data" } : { error: "invalid_input" },
+        { status: 400 },
+      );
     }
 
     const body = request.body;
     if (!body) {
-      return NextResponse.json({ error: "invalid_input" }, { status: 400 });
+      return NextResponse.json(
+        debug ? { error: "invalid_input", message: "Missing request body" } : { error: "invalid_input" },
+        { status: 400 },
+      );
     }
 
     let sawFile = false;
@@ -184,6 +191,10 @@ export async function POST(request: Request) {
     if (message === "PATTERN_NOT_FOUND") {
       return NextResponse.json({ error: "invalid_file" }, { status: 400 });
     }
-    return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
+    const debug = request.headers.get("x-rewind-debug") === "1" || process.env.NODE_ENV !== "production";
+    return NextResponse.json(
+      debug ? { error: "analysis_failed", message: error instanceof Error ? error.message : String(error) } : { error: "analysis_failed" },
+      { status: 500 },
+    );
   }
 }
