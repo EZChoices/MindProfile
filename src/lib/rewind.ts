@@ -12,6 +12,20 @@ export interface PhraseInsight {
   count: number;
 }
 
+export interface RewindBehavior {
+  pleaseCount: number;
+  thankYouCount: number;
+  sorryCount: number;
+  canYouCount: number;
+  stepByStepCount: number;
+  quickQuestionCount: number;
+  brokenCount: number;
+  wtfCount: number;
+  spicyWordCount: number;
+  yellingMessageCount: number;
+  whiplashChatCount: number;
+}
+
 export interface RewindSummary {
   totalConversations: number;
   totalUserMessages: number;
@@ -25,6 +39,7 @@ export interface RewindSummary {
   longestPromptChars: number | null;
   avgPromptChars: number | null;
   promptLengthChangePercent: number | null;
+  behavior: RewindBehavior;
 }
 
 const STOPWORDS = new Set([
@@ -119,13 +134,28 @@ const ANON_TOKENS = new Set(["name", "email", "phone", "url"]);
 const HABIT_PHRASES: Array<{ phrase: string; pattern: RegExp }> = [
   { phrase: "thank you", pattern: /\bthanks\b|\bthank you\b/gi },
   { phrase: "please", pattern: /\bplease\b/gi },
+  { phrase: "sorry", pattern: /\bsorry\b|\bmy bad\b|\bapolog(?:y|ize|ise|ies)\b/gi },
   { phrase: "quick question", pattern: /\bquick question\b/gi },
   { phrase: "step by step", pattern: /\bstep by step\b/gi },
   { phrase: "one more thing", pattern: /\bone more (thing)?\b/gi },
   { phrase: "what about", pattern: /\bwhat about\b/gi },
   { phrase: "can you", pattern: /\bcan you\b/gi },
-  { phrase: "explain like I’m 5", pattern: /\bexplain (it )?like (i'?m|i am) (5|five)\b/gi },
+  { phrase: "explain like I'm 5", pattern: /\bexplain (it )?like (i'?m|i am) (5|five)\b/gi },
+  { phrase: "why is this broken", pattern: /\bwhy (is|is it|it's) (this|it) broken\b/gi },
+  { phrase: "doesn't work", pattern: /\bdoesn'?t work\b|\bnot working\b|\bisn'?t working\b/gi },
+  { phrase: "wtf", pattern: /\bwtf\b|\bwhat the (hell|heck)\b/gi },
 ];
+
+const SPICY_WORD_PATTERN =
+  /\b(useless|idiot|stupid|dumb|garbage|trash|toaster)\b/gi;
+const SWEAR_PATTERN = /\b(fuck|shit|damn)\b/gi;
+
+const isYellingMessage = (text: string) => {
+  const lettersOnly = text.replace(/[^a-zA-Z]/g, "");
+  if (lettersOnly.length < 12) return false;
+  const upper = lettersOnly.replace(/[^A-Z]/g, "").length;
+  return upper / lettersOnly.length >= 0.75;
+};
 
 const TOPIC_BUCKETS: Array<{
   key: string;
@@ -299,6 +329,9 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
   const topicCounts = new Map<string, number>();
   const wordFreq = new Map<string, number>();
   const habitCounts = new Map<string, number>();
+  let spicyWordCount = 0;
+  let yellingMessageCount = 0;
+  let whiplashChatCount = 0;
 
   let longestPromptChars = 0;
   let totalPromptChars = 0;
@@ -327,6 +360,8 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
 
     const messages = extractConversationMessages(convRecord);
     let conversationHasIncluded = false;
+    const conversationHabitCounts = new Map<string, number>();
+    let conversationSpicy = 0;
 
     for (const msg of messages) {
       const msgRecord = asRecord(msg);
@@ -384,7 +419,22 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
         const hits = countMatches(lowered, habit.pattern);
         if (hits > 0) {
           habitCounts.set(habit.phrase, (habitCounts.get(habit.phrase) ?? 0) + hits);
+          conversationHabitCounts.set(
+            habit.phrase,
+            (conversationHabitCounts.get(habit.phrase) ?? 0) + hits,
+          );
         }
+      }
+
+      const spicyHits =
+        countMatches(lowered, SPICY_WORD_PATTERN) + countMatches(lowered, SWEAR_PATTERN);
+      if (spicyHits > 0) {
+        spicyWordCount += spicyHits;
+        conversationSpicy += spicyHits;
+      }
+
+      if (isYellingMessage(trimmed)) {
+        yellingMessageCount += 1;
       }
 
       // Word frequencies
@@ -423,6 +473,13 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
     if (!conversationHasIncluded) return;
 
     totalConversations += 1;
+
+    const conversationSorry = conversationHabitCounts.get("sorry") ?? 0;
+    const conversationThanks = conversationHabitCounts.get("thank you") ?? 0;
+    const conversationPlease = conversationHabitCounts.get("please") ?? 0;
+    if (conversationSpicy > 0 && (conversationSorry > 0 || conversationThanks > 0 || conversationPlease > 0)) {
+      whiplashChatCount += 1;
+    }
 
     let bestTopic: { key: string; score: number } | null = null;
     for (const bucket of TOPIC_BUCKETS) {
@@ -499,6 +556,9 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       }
     }
 
+    const getHabit = (phrase: string) => habitCounts.get(phrase) ?? 0;
+    const brokenCount = getHabit("why is this broken") + getHabit("doesn't work");
+
     return {
       totalConversations,
       totalUserMessages,
@@ -512,6 +572,19 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       longestPromptChars: totalUserMessages > 0 ? longestPromptChars : null,
       avgPromptChars,
       promptLengthChangePercent,
+      behavior: {
+        pleaseCount: getHabit("please"),
+        thankYouCount: getHabit("thank you"),
+        sorryCount: getHabit("sorry"),
+        canYouCount: getHabit("can you"),
+        stepByStepCount: getHabit("step by step"),
+        quickQuestionCount: getHabit("quick question"),
+        brokenCount,
+        wtfCount: getHabit("wtf"),
+        spicyWordCount,
+        yellingMessageCount,
+        whiplashChatCount,
+      },
     };
   };
 

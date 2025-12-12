@@ -9,10 +9,12 @@ import type { RewindClientProgress } from "@/lib/rewindFileClient";
 
 const errorMessages: Record<string, string> = {
   no_file: "Please select your ChatGPT export file.",
-  invalid_file: "We couldn’t read that file. Please upload the ChatGPT export ZIP or JSON.",
-  no_data: "That export looks empty — make sure you have some chat history.",
-  analysis_failed: "We couldn’t generate your Rewind. Please try again.",
+  invalid_file: "We couldn't read that file. Please upload the ChatGPT export ZIP or JSON.",
+  no_data: "That export looks empty - make sure you have some chat history.",
+  analysis_failed: "We couldn't generate your Rewind. Please try again.",
 };
+
+const BORING_TOP_WORDS = new Set(["name", "email", "phone", "url"]);
 
 const formatHour = (hour: number) => {
   const display = hour % 12 === 0 ? 12 : hour % 12;
@@ -27,38 +29,38 @@ type ShareInsight = { headline: string; subhead?: string };
 const topicMeaning = (key: string | undefined) => {
   switch (key) {
     case "coding":
-      return "You mostly came here to build things.";
+      return "You came here to build things. Not just look them up.";
     case "writing":
-      return "You came here to find the right words.";
+      return "You came here to find the right words — then rewrite them.";
     case "learning":
-      return "You came here to understand, not just to know.";
+      return "You didn’t want trivia. You wanted it to click.";
     case "planning":
-      return "You came here to get organized and get moving.";
+      return "You came here to turn chaos into a plan.";
     case "travel":
       return "You came here to map it out before you went.";
     case "career":
-      return "You came here to sharpen how you show up.";
+      return "You came here to sharpen your next move.";
     case "creative":
-      return "You came here to play with ideas until they clicked.";
+      return "You came here to play until something stuck.";
     default:
-      return "You had a theme. You kept coming back to it.";
+      return "You had a few lanes. You stayed in them.";
   }
 };
 
 const topicTagline = (key: string | undefined) => {
   switch (key) {
     case "coding":
-      return "You treated AI like a co-builder, not a search engine.";
+      return "You didn’t use AI to browse. You used it to build.";
     case "writing":
-      return "You came here to make it sound like you.";
+      return "You came here to make it sound like you (but better).";
     case "learning":
-      return "You kept asking until it actually clicked.";
+      return "You kept asking until it actually clicked. Respect.";
     case "planning":
-      return "You used AI like a second brain with a deadline.";
+      return 'You turned "??" into checklists. Repeatedly.';
     case "travel":
       return "You planned it like a pro (with a co-pilot).";
     case "career":
-      return "You sharpened how you show up.";
+      return "You workshopped your next move like it mattered.";
     case "creative":
       return "You played with ideas until one sparked.";
     default:
@@ -75,94 +77,187 @@ const timeOfDayLabel = (hour: number) => {
   return "late nights";
 };
 
-const pickShareInsight = (summary: RewindSummary): ShareInsight => {
-  const getPhrase = (phrase: string) => summary.frequentPhrases.find((p) => p.phrase === phrase);
+const primeTimeRoast = (hour: number) => {
+  if (hour >= 5 && hour <= 8) return "Fresh brain. Zero distractions.";
+  if (hour >= 9 && hour <= 11) return "Coffee in. Brain online.";
+  if (hour >= 12 && hour <= 14) return "Midday focus. Clear head.";
+  if (hour >= 15 && hour <= 17) return "Last-minute genius hours.";
+  if (hour >= 18 && hour <= 21) return "After-hours thinking.";
+  return "Late-night energy. You brought it here.";
+};
 
-  const please = getPhrase("please");
-  if (please && please.count >= 25) {
-    return { headline: "You ran ChatGPT in polite mode all year.", subhead: `"please" × ${please.count.toLocaleString()}` };
+const pickShareInsight = (summary: RewindSummary): ShareInsight => {
+  const b = summary.behavior;
+  const hasChaos = b.spicyWordCount > 0 || b.brokenCount > 0 || b.wtfCount > 0 || b.yellingMessageCount > 0;
+
+  const candidates: Array<{ score: number; insight: ShareInsight }> = [];
+
+  if (b.whiplashChatCount > 0) {
+    candidates.push({
+      score: 100 + b.whiplashChatCount,
+      insight: {
+        headline: "You snapped. Said sorry. Asked for help again.",
+        subhead: `${b.whiplashChatCount.toLocaleString()} chats of chaos → apology → help.`,
+      },
+    });
   }
 
-  const thankYou = getPhrase("thank you");
-  if (thankYou && thankYou.count >= 25) {
-    return {
-      headline: "Gratitude mode stayed on.",
-      subhead: `"thank you" × ${thankYou.count.toLocaleString()}`,
-    };
+  if (b.spicyWordCount > 0) {
+    candidates.push({
+      score: 95 + b.spicyWordCount,
+      insight: {
+        headline: "You got spicy. Then you asked for help anyway.",
+        subhead: `${b.spicyWordCount.toLocaleString()} spicy moments.`,
+      },
+    });
+  }
+
+  if (b.stepByStepCount > 0 && b.brokenCount > 0) {
+    candidates.push({
+      score: 92 + b.stepByStepCount + b.brokenCount,
+      insight: {
+        headline: 'You love "step by step" until it’s "why is this broken".',
+        subhead: `"step by step" × ${b.stepByStepCount.toLocaleString()} · "broken" × ${b.brokenCount.toLocaleString()}`,
+      },
+    });
+  } else if (b.brokenCount > 0) {
+    candidates.push({
+      score: 88 + b.brokenCount,
+      insight: {
+        headline: 'You went straight to "why is this broken" mode.',
+        subhead: `"broken" × ${b.brokenCount.toLocaleString()}`,
+      },
+    });
+  } else if (b.stepByStepCount > 0) {
+    candidates.push({
+      score: 80 + b.stepByStepCount,
+      insight: {
+        headline: 'You demanded "step by step". Chaos was not invited.',
+        subhead: `"step by step" × ${b.stepByStepCount.toLocaleString()}`,
+      },
+    });
+  }
+
+  if (b.yellingMessageCount > 0) {
+    candidates.push({
+      score: 86 + b.yellingMessageCount,
+      insight: {
+        headline: "CAPS LOCK made a cameo.",
+        subhead: `${b.yellingMessageCount.toLocaleString()} times.`,
+      },
+    });
+  }
+
+  if (b.wtfCount > 0) {
+    candidates.push({
+      score: 85 + b.wtfCount,
+      insight: {
+        headline: 'You had a few "WTF" moments.',
+        subhead: `${b.wtfCount.toLocaleString()} times.`,
+      },
+    });
+  }
+
+  if (b.pleaseCount >= 25) {
+    candidates.push({
+      score: 70 + b.pleaseCount,
+      insight: {
+        headline: hasChaos ? "Polite… until it didn’t work." : "Polite mode stayed on.",
+        subhead: `"please" × ${b.pleaseCount.toLocaleString()}`,
+      },
+    });
+  }
+
+  if (b.quickQuestionCount > 0) {
+    candidates.push({
+      score: 68 + b.quickQuestionCount,
+      insight: {
+        headline: '"Quick question" was never quick.',
+        subhead: `"quick question" × ${b.quickQuestionCount.toLocaleString()}`,
+      },
+    });
   }
 
   if (summary.promptLengthChangePercent != null) {
-    if (summary.promptLengthChangePercent < 0) {
-      return {
-        headline: "You learned how to talk to AI this year.",
-        subhead: `Your prompts got ${Math.abs(summary.promptLengthChangePercent)}% shorter.`,
-      };
-    }
-    return {
-      headline: "You got bolder with your asks this year.",
-      subhead: `Your prompts got ${Math.abs(summary.promptLengthChangePercent)}% longer.`,
-    };
-  }
-
-  if (summary.activeDays >= 200) {
-    return {
-      headline: `You showed up ${summary.activeDays.toLocaleString()} days.`,
-      subhead: "This wasn’t casual use.",
-    };
+    candidates.push({
+      score: 55 + Math.abs(summary.promptLengthChangePercent),
+      insight: {
+        headline:
+          summary.promptLengthChangePercent < 0 ? "Early-year: essays. End-of-year: commands." : "More context. More control.",
+        subhead: `Prompts got ${Math.abs(summary.promptLengthChangePercent)}% ${
+          summary.promptLengthChangePercent > 0 ? "longer" : "shorter"
+        }.`,
+      },
+    });
   }
 
   const topTopic = summary.topTopics[0];
   if (topTopic) {
-    return {
-      headline: `Top vibe: ${topTopic.label}.`,
-      subhead: topicMeaning(topTopic.key),
-    };
+    candidates.push({
+      score: 40 + topTopic.count,
+      insight: {
+        headline: topicTagline(topTopic.key),
+        subhead: `Top obsession: ${topTopic.label}.`,
+      },
+    });
   }
 
-  return { headline: "Your AI Year in Rewind.", subhead: "A private highlight reel." };
+  if (summary.activeDays > 0) {
+    candidates.push({
+      score: 20 + summary.activeDays,
+      insight: {
+        headline: "You didn’t try AI. You lived here.",
+        subhead: `${summary.activeDays.toLocaleString()} days you showed up.`,
+      },
+    });
+  }
+
+  candidates.sort((a, c) => c.score - a.score);
+  return candidates[0]?.insight ?? { headline: "Your AI Year in Rewind.", subhead: "Private. Unfiltered. Just for fun." };
 };
 
 const closingReflectionLines = (summary: RewindSummary) => {
   const top = summary.topTopics[0]?.key;
   const lines: string[] = [];
 
-  lines.push("This wasn’t about answers. It was about clarity.");
+  lines.push("This wasn’t about answers. It was about control, clarity, and getting unstuck.");
 
   switch (top) {
     case "coding":
-      lines.push("You came here to build. And you kept building.");
+      lines.push("You didn’t come here to browse. You came here to ship.");
       break;
     case "writing":
-      lines.push("You came here to shape ideas into words.");
+      lines.push("You came here to make the words behave.");
       break;
     case "learning":
-      lines.push("You came here to understand things, not just skim them.");
+      lines.push("You kept pushing until it clicked.");
       break;
     case "planning":
-      lines.push("You came here to turn thoughts into a plan.");
+      lines.push("You came here because guessing wasn’t working.");
       break;
     case "travel":
-      lines.push("You came here to map it out before you went.");
+      lines.push("You planned it like you were allergic to surprises.");
       break;
     case "career":
-      lines.push("You came here to sharpen your next move.");
+      lines.push("You came here to rehearse the next move.");
       break;
     case "creative":
-      lines.push("You came here to play until something clicked.");
+      lines.push("You came here to play — then polish.");
       break;
     default:
-      lines.push("You came here to get unstuck. And you did.");
+      lines.push("You came here to think out loud until it made sense.");
       break;
   }
 
-  if (summary.promptLengthChangePercent != null) {
-    lines.push(
-      summary.promptLengthChangePercent < 0
-        ? "By the end of the year, you knew exactly what to ask."
-        : "By the end of the year, you weren’t afraid to add context.",
-    );
+  if (
+    summary.behavior.whiplashChatCount > 0 ||
+    summary.behavior.brokenCount > 0 ||
+    summary.behavior.spicyWordCount > 0 ||
+    summary.behavior.yellingMessageCount > 0
+  ) {
+    lines.push("You argued with a machine. You lost sometimes. You came back anyway.");
   } else {
-    lines.push("By the end of the year, you had a rhythm with it.");
+    lines.push("You used a machine to think better. That counts.");
   }
 
   return lines;
@@ -222,7 +317,7 @@ const renderShareCardPng = async (insight: ShareInsight) => {
 
   ctx.fillStyle = "rgba(148, 163, 184, 0.95)";
   ctx.font = "600 22px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
-  ctx.fillText("YOUR AI YEAR IN REWIND", 90, 132);
+  ctx.fillText("AI YEAR IN REWIND · UNFILTERED", 90, 132);
 
   ctx.fillStyle = "#ffffff";
   ctx.font = "800 72px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
@@ -304,9 +399,9 @@ export default function RewindPage() {
         const file = new File([png], "mindprofile-rewind.png", { type: "image/png" });
 
         if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
-          await navigator.share({ title: "Your AI Year in Rewind", text: insight.headline, files: [file] });
+          await navigator.share({ title: "AI Year in Rewind — Unfiltered", text: insight.headline, files: [file] });
         } else {
-          await navigator.share({ title: "Your AI Year in Rewind", text });
+          await navigator.share({ title: "AI Year in Rewind — Unfiltered", text });
         }
         setShareStatus("Shared.");
         return;
@@ -452,6 +547,9 @@ export default function RewindPage() {
             Your AI Year in Rewind
           </h1>
           <p className="muted text-base leading-relaxed text-slate-100">
+            This is the part where you get called out.
+          </p>
+          <p className="muted text-sm text-slate-200">
             It takes about 2 minutes. Nothing is uploaded. Nothing is shared.
           </p>
         </header>
@@ -555,7 +653,7 @@ export default function RewindPage() {
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                    Your year at a glance
+                    How deep you went
                   </div>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -580,15 +678,15 @@ export default function RewindPage() {
 
                   <p className="muted mt-4 text-sm text-slate-100">
                     {rewind.activeDays >= 260
-                      ? "This wasn’t casual use. You came back often."
+                      ? 'You didn’t "try" AI. You lived here.'
                       : rewind.activeDays >= 120
-                        ? "You kept coming back when something mattered."
+                        ? "Not casual. Not random. You came back when it mattered."
                         : "You dropped in when you needed a second brain."}
                   </p>
 
                   {rewind.topTopics[0] && (
                     <p className="mt-3 text-sm text-slate-100">
-                      Top vibe:{" "}
+                      Main obsession:{" "}
                       <b>
                         {rewind.topTopics[0].emoji} {rewind.topTopics[0].label}
                       </b>
@@ -624,21 +722,25 @@ export default function RewindPage() {
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Prime time</div>
                   <div className="mt-2 text-lg font-semibold text-white">
-                    {rewind.peakHour != null ? formatHourRange(rewind.peakHour) : "—"}
+                    {rewind.peakHour != null ? formatHourRange(rewind.peakHour) : "-"}
                   </div>
-                  <p className="muted mt-1 text-xs text-slate-200">That's when your best questions happened.</p>
+                  <p className="muted mt-1 text-xs text-slate-200">
+                    {rewind.peakHour != null ? primeTimeRoast(rewind.peakHour) : "You had a schedule. Kind of."}
+                  </p>
                   {rewind.lateNightPercent > 0 && (
                     <p className="muted mt-2 text-xs text-slate-200">
-                      Late-night detours: {rewind.lateNightPercent}%.
+                      After-hours energy: {rewind.lateNightPercent}%.
                     </p>
                   )}
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Busiest month</div>
                   <div className="mt-2 text-lg font-semibold text-white">
-                    {rewind.busiestMonth ?? "—"}
+                    {rewind.busiestMonth ?? "-"}
                   </div>
-                  <p className="muted mt-1 text-xs text-slate-200">Something was clearly happening.</p>
+                  <p className="muted mt-1 text-xs text-slate-200">
+                    {rewind.busiestMonth ? `${rewind.busiestMonth} was unhinged.` : "You had a peak. We saw it."}
+                  </p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Prompts per chat</div>
@@ -654,7 +756,7 @@ export default function RewindPage() {
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                What you came here for
+                What you actually used AI for
               </div>
               {rewind.topTopics[0] && (
                 <p className="muted mt-3 text-sm text-slate-100">
@@ -691,123 +793,110 @@ export default function RewindPage() {
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                Your AI rhythm
+                Work rhythm
               </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-100">
                 <p>
                   {rewind.activeDays >= 260
-                    ? `You showed up on ${rewind.activeDays.toLocaleString()} different days. This was a habit.`
+                    ? `You showed up on ${rewind.activeDays.toLocaleString()} different days. That’s a routine.`
                     : rewind.activeDays >= 120
                       ? `You showed up on ${rewind.activeDays.toLocaleString()} different days. Consistent energy.`
-                      : `You showed up on ${rewind.activeDays.toLocaleString()} different days. You knew when you needed it.`}
+                      : `You showed up on ${rewind.activeDays.toLocaleString()} different days. You knew when to tap in.`}
                 </p>
 
                 {rewind.peakHour != null && (
                   <p>
-                    Most of your chats landed in <b>{timeOfDayLabel(rewind.peakHour)}</b>. Prime time was{" "}
-                    <b>{formatHourRange(rewind.peakHour)}</b>.
+                    Most of your chats landed in <b>{timeOfDayLabel(rewind.peakHour)}</b>. {primeTimeRoast(rewind.peakHour)}
                   </p>
                 )}
 
                 {rewind.busiestMonth && (
                   <p>
-                    And <b>{rewind.busiestMonth}</b> was your peak.
+                    Your peak month was <b>{rewind.busiestMonth}</b>. We won’t ask why.
                   </p>
                 )}
 
                 <p className="muted text-slate-200">
                   {rewind.lateNightPercent >= 25
-                    ? "Translation: you did some of your best thinking after hours."
-                    : "Translation: you came here with clarity, not chaos."}
+                    ? "Translation: the late-night spirals were productive."
+                    : "Translation: you came here before it became chaos."}
                 </p>
               </div>
             </div>
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                Your AI quirks
+                How you treated AI
               </div>
-              <p className="muted mt-3 text-sm text-slate-100">
-                The part you'll want to screenshot.
-              </p>
+              <p className="muted mt-3 text-sm text-slate-100">Not judging. Just holding up the mirror.</p>
 
               <ul className="mt-5 space-y-3 text-sm text-slate-100">
                 {(() => {
-                  const get = (phrase: string) =>
-                    rewind.frequentPhrases.find((p) => p.phrase === phrase)?.count ?? 0;
-                  const please = get("please");
-                  const thankYou = get("thank you");
-                  const canYou = get("can you");
-                  const quick = get("quick question");
-                  const step = get("step by step");
+                  const b = rewind.behavior;
                   const items: Array<{ key: string; node: ReactNode }> = [];
 
-                  if (please > 0) {
+                  if (b.whiplashChatCount > 0) {
                     items.push({
-                      key: "please",
+                      key: "whiplash",
                       node: (
                         <span>
-                          You ran ChatGPT in polite mode all year. Good manners survived automation.{" "}
-                          <span className="muted text-xs text-slate-200">("please" × {please.toLocaleString()})</span>
+                          You snapped. Then you said sorry. Then you asked for help again.{" "}
+                          <span className="muted text-xs text-slate-200">
+                            ({b.whiplashChatCount.toLocaleString()} chats)
+                          </span>
                         </span>
                       ),
                     });
                   }
 
-                  if (thankYou > 0) {
+                  if (b.spicyWordCount > 0) {
                     items.push({
-                      key: "thankyou",
+                      key: "spicy",
                       node: (
                         <span>
-                          You said thanks a lot. Even to a machine.{" "}
-                          <span className="muted text-xs text-slate-200">("thank you" × {thankYou.toLocaleString()})</span>
+                          You got spicy <b>{b.spicyWordCount.toLocaleString()}</b> times. Still wanted answers.
                         </span>
                       ),
                     });
                   }
 
-                  if (canYou > 0) {
+                  if (b.yellingMessageCount > 0) {
                     items.push({
-                      key: "canyou",
+                      key: "caps",
                       node: (
                         <span>
-                          You love a clean ask. "Can you…" was basically your opener.{" "}
-                          <span className="muted text-xs text-slate-200">("can you" × {canYou.toLocaleString()})</span>
+                          CAPS LOCK made a cameo.{" "}
+                          <span className="muted text-xs text-slate-200">
+                            ({b.yellingMessageCount.toLocaleString()} times)
+                          </span>
                         </span>
                       ),
                     });
                   }
 
-                  if (quick > 0) {
+                  if (b.brokenCount > 0) {
                     items.push({
-                      key: "quick",
+                      key: "broken",
                       node: (
                         <span>
-                          Your "quick question" was rarely quick.{" "}
-                          <span className="muted text-xs text-slate-200">("quick question" × {quick.toLocaleString()})</span>
+                          You went straight to <b>"why is this broken"</b> mode.{" "}
+                          <span className="muted text-xs text-slate-200">
+                            ({b.brokenCount.toLocaleString()} times)
+                          </span>
                         </span>
                       ),
                     });
                   }
 
-                  if (step > 0) {
+                  if (b.wtfCount > 0) {
                     items.push({
-                      key: "step",
+                      key: "wtf",
                       node: (
                         <span>
-                          You love a step-by-step. Chaos was not invited.{" "}
-                          <span className="muted text-xs text-slate-200">("step by step" × {step.toLocaleString()})</span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (rewind.topWord) {
-                    items.push({
-                      key: "topword",
-                      node: (
-                        <span>
-                          Word you kept coming back to: <b>{rewind.topWord}</b>.
+                          You had a few <b>"WTF"</b> moments.{" "}
+                          <span className="muted text-xs text-slate-200">
+                            ({b.wtfCount.toLocaleString()} times)
+                          </span>
                         </span>
                       ),
                     });
@@ -815,12 +904,12 @@ export default function RewindPage() {
 
                   if (items.length === 0) {
                     items.push({
-                      key: "fallback",
-                      node: <span>You kept it fresh. No single quirk dominated.</span>,
+                      key: "calm",
+                      node: <span>You kept it surprisingly civil. Still demanding. Still curious.</span>,
                     });
                   }
 
-                  return items.slice(0, 5).map((it) => (
+                  return items.slice(0, 4).map((it) => (
                     <li key={it.key} className="leading-relaxed">
                       {it.node}
                     </li>
@@ -831,7 +920,164 @@ export default function RewindPage() {
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                Growth over time
+                Receipts
+              </div>
+              <p className="muted mt-3 text-sm text-slate-100">
+                We brought evidence.
+              </p>
+
+              <ul className="mt-5 space-y-3 text-sm text-slate-100">
+                {(() => {
+                  const b = rewind.behavior;
+                  const hasChaos =
+                    b.spicyWordCount > 0 || b.brokenCount > 0 || b.wtfCount > 0 || b.yellingMessageCount > 0;
+                  const items: Array<{ key: string; node: ReactNode }> = [];
+
+                  if (b.whiplashChatCount > 0) {
+                    items.push({
+                      key: "whiplash",
+                      node: (
+                        <span>
+                          You snapped, apologized, and kept going.{" "}
+                          <span className="muted text-xs text-slate-200">({b.whiplashChatCount.toLocaleString()} chats)</span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.wtfCount > 0) {
+                    items.push({
+                      key: "wtf",
+                      node: (
+                        <span>
+                          You had a few <b>"WTF"</b> moments.{" "}
+                          <span className="muted text-xs text-slate-200">({b.wtfCount.toLocaleString()} times)</span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.spicyWordCount > 0) {
+                    items.push({
+                      key: "spicy",
+                      node: (
+                        <span>
+                          You got spicy. Then you asked for help anyway.{" "}
+                          <span className="muted text-xs text-slate-200">({b.spicyWordCount.toLocaleString()} times)</span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.yellingMessageCount > 0) {
+                    items.push({
+                      key: "caps",
+                      node: (
+                        <span>
+                          CAPS LOCK made a cameo.{" "}
+                          <span className="muted text-xs text-slate-200">
+                            ({b.yellingMessageCount.toLocaleString()} times)
+                          </span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.stepByStepCount > 0 && b.brokenCount > 0) {
+                    items.push({
+                      key: "stepbroken",
+                      node: (
+                        <span>
+                          You love <b>"step by step"</b> until it’s <b>"why is this broken"</b>.{" "}
+                          <span className="muted text-xs text-slate-200">
+                            ("step by step" × {b.stepByStepCount.toLocaleString()}, "broken" ×{" "}
+                            {b.brokenCount.toLocaleString()})
+                          </span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.pleaseCount > 0) {
+                    items.push({
+                      key: "please",
+                      node: (
+                        <span>
+                          You said <b>"please"</b> {b.pleaseCount.toLocaleString()} times.{" "}
+                          {hasChaos ? "Polite… until it didn’t work." : "Polite mode stayed on."}{" "}
+                          <span className="muted text-xs text-slate-200">("please" × {b.pleaseCount.toLocaleString()})</span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.quickQuestionCount > 0) {
+                    items.push({
+                      key: "quick",
+                      node: (
+                        <span>
+                          You said <b>"quick question"</b> {b.quickQuestionCount.toLocaleString()} times. None were quick.{" "}
+                          <span className="muted text-xs text-slate-200">
+                            ("quick question" × {b.quickQuestionCount.toLocaleString()})
+                          </span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.canYouCount > 0) {
+                    items.push({
+                      key: "canyou",
+                      node: (
+                        <span>
+                          You opened with <b>"can you"</b> like it was a spell.{" "}
+                          <span className="muted text-xs text-slate-200">("can you" × {b.canYouCount.toLocaleString()})</span>
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (b.sorryCount > 0) {
+                    items.push({
+                      key: "sorry",
+                      node: (
+                        <span>
+                          You said sorry <b>{b.sorryCount.toLocaleString()}</b> times. Character development.
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (rewind.topWord && !BORING_TOP_WORDS.has(rewind.topWord.toLowerCase())) {
+                    items.push({
+                      key: "topword",
+                      node: (
+                        <span>
+                          Word you couldn’t quit: <b>{rewind.topWord}</b>.
+                        </span>
+                      ),
+                    });
+                  }
+
+                  if (items.length === 0) {
+                    items.push({
+                      key: "fallback",
+                      node: <span>You kept it weirdly balanced. No single habit took over.</span>,
+                    });
+                  }
+
+                  return items.slice(0, 7).map((it) => (
+                    <li key={it.key} className="leading-relaxed">
+                      {it.node}
+                    </li>
+                  ));
+                })()}
+              </ul>
+            </div>
+
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                Character arc
               </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-100">
                 {rewind.promptLengthChangePercent != null && (
@@ -840,22 +1086,21 @@ export default function RewindPage() {
                     {rewind.promptLengthChangePercent > 0 ? "longer" : "shorter"} over the year.{" "}
                     <span className="muted text-slate-200">
                       {rewind.promptLengthChangePercent > 0
-                        ? "You started bringing more context."
-                        : "You learned how to talk to AI."}
+                        ? "You started bringing receipts."
+                        : "Early-year: essays. End-of-year: commands."}
                     </span>
                   </p>
                 )}
                 {rewind.longestPromptChars != null && (
                   <p>
-                    At least once, you went all-in:{" "}
-                    <b>{rewind.longestPromptChars.toLocaleString()}</b> characters.{" "}
-                    <span className="muted text-slate-200">No half-asking.</span>
+                    Longest prompt: <b>{rewind.longestPromptChars.toLocaleString()}</b> characters.{" "}
+                    <span className="muted text-slate-200">You did not come to play.</span>
                   </p>
                 )}
                 {rewind.avgPromptChars != null && (
                   <p>
-                    Your typical ask: around <b>{rewind.avgPromptChars}</b> characters.{" "}
-                    <span className="muted text-slate-200">You gave context.</span>
+                    Typical ask: around <b>{rewind.avgPromptChars}</b> characters.{" "}
+                    <span className="muted text-slate-200">You don’t do vague.</span>
                   </p>
                 )}
               </div>
@@ -863,7 +1108,7 @@ export default function RewindPage() {
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                Your year with AI
+                So… what was this really about?
               </div>
               <div className="mt-4 grid gap-2 text-sm text-slate-100">
                 {closingReflectionLines(rewind).map((line) => (

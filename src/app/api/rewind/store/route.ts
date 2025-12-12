@@ -4,10 +4,70 @@ import { prisma } from "@/lib/prisma";
 import { logAnalysisError } from "@/lib/logAnalysisError";
 import type { RewindSummary } from "@/lib/rewind";
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object";
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const isNullableString = (value: unknown): value is string | null =>
+  value === null || typeof value === "string";
+
+const isNullableNumber = (value: unknown): value is number | null =>
+  value === null || isFiniteNumber(value);
+
+const isPhraseInsight = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return typeof value.phrase === "string" && isFiniteNumber(value.count);
+};
+
+const isTopTopic = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.key === "string" &&
+    typeof value.label === "string" &&
+    typeof value.emoji === "string" &&
+    isFiniteNumber(value.count)
+  );
+};
+
+const isBehavior = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    isFiniteNumber(value.pleaseCount) &&
+    isFiniteNumber(value.thankYouCount) &&
+    isFiniteNumber(value.sorryCount) &&
+    isFiniteNumber(value.canYouCount) &&
+    isFiniteNumber(value.stepByStepCount) &&
+    isFiniteNumber(value.quickQuestionCount) &&
+    isFiniteNumber(value.brokenCount) &&
+    isFiniteNumber(value.wtfCount) &&
+    isFiniteNumber(value.spicyWordCount) &&
+    isFiniteNumber(value.yellingMessageCount) &&
+    isFiniteNumber(value.whiplashChatCount)
+  );
+};
+
 const isRewindSummary = (value: unknown): value is RewindSummary => {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
-  return typeof record.totalConversations === "number" && typeof record.totalUserMessages === "number";
+  if (!isRecord(value)) return false;
+
+  return (
+    isFiniteNumber(value.totalConversations) &&
+    isFiniteNumber(value.totalUserMessages) &&
+    isFiniteNumber(value.activeDays) &&
+    isNullableString(value.busiestMonth) &&
+    isNullableNumber(value.peakHour) &&
+    isFiniteNumber(value.lateNightPercent) &&
+    Array.isArray(value.topTopics) &&
+    value.topTopics.every(isTopTopic) &&
+    (value.topWord === null || typeof value.topWord === "string") &&
+    Array.isArray(value.frequentPhrases) &&
+    value.frequentPhrases.every(isPhraseInsight) &&
+    isNullableNumber(value.longestPromptChars) &&
+    isNullableNumber(value.avgPromptChars) &&
+    isNullableNumber(value.promptLengthChangePercent) &&
+    isBehavior(value.behavior)
+  );
 };
 
 export async function POST(request: Request) {
@@ -57,4 +117,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "analysis_failed" }, { status: 500 });
   }
 }
-
