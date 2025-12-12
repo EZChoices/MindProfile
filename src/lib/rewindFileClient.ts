@@ -1,4 +1,4 @@
-import { Unzip } from "fflate";
+import { Unzip, UnzipInflate } from "fflate";
 import { createRewindAnalyzer } from "./rewind";
 import type { RewindSummary } from "./rewind";
 
@@ -229,7 +229,16 @@ const conversationsJsonBytesFromZip = (
         queue.close();
       }
     };
+
+    if (isTarget) {
+      try {
+        entry.start();
+      } catch (error) {
+        queue.fail(error);
+      }
+    }
   });
+  unzip.register(UnzipInflate);
 
   void (async () => {
     try {
