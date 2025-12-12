@@ -61,15 +61,28 @@ export async function POST(request: Request) {
     const rewind = analyzeChatExport(conversations);
     const year = new Date().getFullYear();
 
-    const dbRewind = await prisma.yearSummary.create({
-      data: {
+    let rewindId: string | null = null;
+    try {
+      const dbRewind = await prisma.yearSummary.create({
+        data: {
+          clientId,
+          year,
+          summaryJson: rewind as unknown as Prisma.InputJsonValue,
+        },
+      });
+      rewindId = dbRewind.id;
+    } catch (error) {
+      console.warn("Failed to persist YearSummary", error);
+      await logAnalysisError({
         clientId,
-        year,
-        summaryJson: rewind as unknown as Prisma.InputJsonValue,
-      },
-    });
+        sourceMode: "full_history",
+        errorCode: "rewind_store_failed",
+        message: error instanceof Error ? error.message : "Unknown error",
+        meta: { stack: error instanceof Error ? error.stack : String(error) },
+      });
+    }
 
-    return NextResponse.json({ rewind, rewindId: dbRewind.id });
+    return NextResponse.json({ rewind, rewindId });
   } catch (error) {
     console.error("Rewind endpoint failed", error);
     await logAnalysisError({
