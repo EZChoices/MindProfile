@@ -170,7 +170,7 @@ export default function RewindPage() {
               How to grab your export
             </div>
             <ol className="mt-3 list-decimal space-y-2 pl-4 text-sm text-slate-100">
-              <li>Open ChatGPT → Settings → Data controls → Export data.</li>
+              <li>Open ChatGPT settings, then export your data.</li>
               <li>Check your email for the download link, then grab the file.</li>
               <li>Upload the ZIP or JSON here — no need to unzip.</li>
             </ol>
@@ -297,7 +297,7 @@ export default function RewindPage() {
                 )}
                 {rewind.lateNightPercent > 0 && (
                   <p>
-                    🌙 Late‑night chats made up <b>{rewind.lateNightPercent}%</b> of your year.
+                    Late-night chats made up <b>{rewind.lateNightPercent}%</b> of your year.
                   </p>
                 )}
               </div>

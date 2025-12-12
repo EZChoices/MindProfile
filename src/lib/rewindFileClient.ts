@@ -289,7 +289,7 @@ export async function analyzeRewindFileClient(
 
   const updateConversations = (p: { conversationsProcessed: number }) => {
     conversationsProcessed = p.conversationsProcessed;
-    if (phase === "unzipping" && conversationsProcessed > 0) {
+    if ((phase === "unzipping" || phase === "reading") && conversationsProcessed > 0) {
       phase = "parsing";
     }
     report();
