@@ -128,12 +128,17 @@ export default function RewindPage() {
     } catch (err) {
       console.error("Rewind upload failed", err);
       const message = err instanceof Error ? err.message : String(err);
-      if (file.size > 25 * 1024 * 1024) {
-        setApiError("Upload failed — this export may be too large for this deployment.");
+      const lower = message.toLowerCase();
+      if (
+        lower.includes("conversations.json") ||
+        lower.includes("unsupported file type") ||
+        lower.includes("unexpected token")
+      ) {
+        setApiError(errorMessages.invalid_file);
       } else {
         setApiError(errorMessages.analysis_failed);
       }
-      setDebugDetails(err instanceof Error ? err.message : String(err));
+      setDebugDetails(message);
     } finally {
       setLoading(false);
     }

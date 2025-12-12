@@ -207,6 +207,7 @@ const conversationsJsonBytesFromZip = (
   let found = false;
   let resolved = false;
   let doneEarly = false;
+  let targetBytes = 0;
 
   const unzip = new Unzip((entry) => {
     const name = (entry.name || "").toLowerCase();
@@ -219,6 +220,7 @@ const conversationsJsonBytesFromZip = (
         return;
       }
       if (isTarget && data && data.length) {
+        targetBytes += data.length;
         queue.push(data);
       }
       if (isTarget && final && !resolved) {
@@ -259,7 +261,12 @@ const conversationsJsonBytesFromZip = (
         return;
       }
 
-      if (found && !resolved) {
+      if (!resolved) {
+        // Some ZIPs don't emit `final` reliably; if we received bytes, close the stream and let parsing decide.
+        if (targetBytes > 0) {
+          queue.close();
+          return;
+        }
         queue.fail(new Error("conversations.json could not be read"));
       }
     } catch (error) {
