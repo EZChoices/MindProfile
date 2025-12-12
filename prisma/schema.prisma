@@ -54,3 +54,15 @@ model AnalysisLog {
   @@index([createdAt])
   @@index([clientId])
 }
+
+model YearSummary {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  clientId    String?  @db.VarChar(64)
+  year        Int?
+  summaryJson Json
+  deletedAt   DateTime?
+
+  @@index([clientId, createdAt])
+  @@index([createdAt])
+}

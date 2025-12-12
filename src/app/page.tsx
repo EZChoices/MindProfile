@@ -88,14 +88,22 @@ export default function Home() {
                     Pulls multiple chats to uncover cross-context patterns.
                   </div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <div className="text-sm font-semibold text-white">
-                    Level 3 · Full history (coming soon)
+                <Link
+                  href="/rewind"
+                  className="block rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:border-emerald-300/60 hover:bg-white/10"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-white">
+                      Level 3 · AI Year in Rewind
+                    </div>
+                    <span className="pill px-3 py-1 text-[10px] font-semibold text-slate-900">
+                      New
+                    </span>
                   </div>
                   <div className="muted mt-1">
-                    Upload JSON exports to track evolution over time.
+                    Upload your ChatGPT export for a fun, full‑year recap.
                   </div>
-                </div>
+                </Link>
               </div>
               <div className="mt-4 flex items-center gap-3 rounded-full border border-white/15 px-4 py-3 text-xs text-emerald-200">
                 <span className="h-2 w-2 rounded-full bg-emerald-300" />
