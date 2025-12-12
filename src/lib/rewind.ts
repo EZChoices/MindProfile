@@ -108,7 +108,13 @@ const STOPWORDS = new Set([
   "some",
   "any",
   "all",
+  "name",
+  "email",
+  "phone",
+  "url",
 ]);
+
+const ANON_TOKENS = new Set(["name", "email", "phone", "url"]);
 
 const HABIT_PHRASES: Array<{ phrase: string; pattern: RegExp }> = [
   { phrase: "thank you", pattern: /\bthanks\b|\bthank you\b/gi },
@@ -310,10 +316,12 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
     const title = typeof titleRaw === "string" ? titleRaw : "";
     const titleLower = title.toLowerCase();
 
-    const matchedTopics = new Set<string>();
+    const topicScores = new Map<string, number>();
     for (const bucket of TOPIC_BUCKETS) {
-      if (bucket.keywords.some((kw) => titleLower.includes(kw))) {
-        matchedTopics.add(bucket.key);
+      for (const kw of bucket.keywords) {
+        if (titleLower.includes(kw)) {
+          topicScores.set(bucket.key, (topicScores.get(bucket.key) ?? 0) + 2);
+        }
       }
     }
 
@@ -360,11 +368,14 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
 
       const lowered = trimmed.toLowerCase();
 
-      // Topics (only check buckets not already hit this conversation)
+      // Topics
       for (const bucket of TOPIC_BUCKETS) {
-        if (matchedTopics.has(bucket.key)) continue;
-        if (bucket.keywords.some((kw) => lowered.includes(kw))) {
-          matchedTopics.add(bucket.key);
+        let scoreDelta = 0;
+        for (const kw of bucket.keywords) {
+          if (lowered.includes(kw)) scoreDelta += 1;
+        }
+        if (scoreDelta > 0) {
+          topicScores.set(bucket.key, (topicScores.get(bucket.key) ?? 0) + scoreDelta);
         }
       }
 
@@ -379,7 +390,7 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       // Word frequencies
       const tokens = tokenize(lowered);
       for (const token of tokens) {
-        if (token.startsWith("[")) continue;
+        if (ANON_TOKENS.has(token)) continue;
         if (token.length < 3) continue;
         if (STOPWORDS.has(token)) continue;
         if (/^\d+$/.test(token)) continue;
@@ -412,8 +423,17 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
     if (!conversationHasIncluded) return;
 
     totalConversations += 1;
-    for (const key of matchedTopics) {
-      topicCounts.set(key, (topicCounts.get(key) ?? 0) + 1);
+
+    let bestTopic: { key: string; score: number } | null = null;
+    for (const bucket of TOPIC_BUCKETS) {
+      const score = topicScores.get(bucket.key) ?? 0;
+      if (score <= 0) continue;
+      if (!bestTopic || score > bestTopic.score) {
+        bestTopic = { key: bucket.key, score };
+      }
+    }
+    if (bestTopic) {
+      topicCounts.set(bestTopic.key, (topicCounts.get(bestTopic.key) ?? 0) + 1);
     }
   };
 
