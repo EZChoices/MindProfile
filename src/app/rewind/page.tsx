@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getOrCreateClientId } from "@/lib/clientId";
 import type { RewindSummary } from "@/lib/rewind";
 import { analyzeRewindFileClient } from "@/lib/rewindFileClient";
 import type { RewindClientProgress } from "@/lib/rewindFileClient";
+import { generateRewindBangers, type RewindBanger, type SpiceLevel } from "@/lib/rewindBangers";
 
 const errorMessages: Record<string, string> = {
   no_file: "Please select your ChatGPT export file.",
@@ -13,8 +14,6 @@ const errorMessages: Record<string, string> = {
   no_data: "That export looks empty - make sure you have some chat history.",
   analysis_failed: "We couldn't generate your Rewind. Please try again.",
 };
-
-const BORING_TOP_WORDS = new Set(["name", "email", "phone", "url"]);
 
 const formatHour = (hour: number) => {
   const display = hour % 12 === 0 ? 12 : hour % 12;
@@ -25,6 +24,8 @@ const formatHour = (hour: number) => {
 const formatHourRange = (hour: number) => `${formatHour(hour)}-${formatHour((hour + 1) % 24)}`;
 
 type ShareInsight = { headline: string; subhead?: string };
+
+const bySpice = (spice: SpiceLevel, variants: { mild: string; spicy: string; savage: string }) => variants[spice];
 
 const topicMeaning = (key: string | undefined) => {
   switch (key) {
@@ -86,141 +87,17 @@ const primeTimeRoast = (hour: number) => {
   return "Late-night energy. You brought it here.";
 };
 
-const pickShareInsight = (summary: RewindSummary): ShareInsight => {
-  const b = summary.behavior;
-  const hasChaos = b.spicyWordCount > 0 || b.brokenCount > 0 || b.wtfCount > 0 || b.yellingMessageCount > 0;
-
-  const candidates: Array<{ score: number; insight: ShareInsight }> = [];
-
-  if (b.whiplashChatCount > 0) {
-    candidates.push({
-      score: 100 + b.whiplashChatCount,
-      insight: {
-        headline: "You snapped. Said sorry. Asked for help again.",
-        subhead: `${b.whiplashChatCount.toLocaleString()} chats of chaos → apology → help.`,
-      },
-    });
-  }
-
-  if (b.spicyWordCount > 0) {
-    candidates.push({
-      score: 95 + b.spicyWordCount,
-      insight: {
-        headline: "You got spicy. Then you asked for help anyway.",
-        subhead: `${b.spicyWordCount.toLocaleString()} spicy moments.`,
-      },
-    });
-  }
-
-  if (b.stepByStepCount > 0 && b.brokenCount > 0) {
-    candidates.push({
-      score: 92 + b.stepByStepCount + b.brokenCount,
-      insight: {
-        headline: 'You love "step by step" until it’s "why is this broken".',
-        subhead: `"step by step" × ${b.stepByStepCount.toLocaleString()} · "broken" × ${b.brokenCount.toLocaleString()}`,
-      },
-    });
-  } else if (b.brokenCount > 0) {
-    candidates.push({
-      score: 88 + b.brokenCount,
-      insight: {
-        headline: 'You went straight to "why is this broken" mode.',
-        subhead: `"broken" × ${b.brokenCount.toLocaleString()}`,
-      },
-    });
-  } else if (b.stepByStepCount > 0) {
-    candidates.push({
-      score: 80 + b.stepByStepCount,
-      insight: {
-        headline: 'You demanded "step by step". Chaos was not invited.',
-        subhead: `"step by step" × ${b.stepByStepCount.toLocaleString()}`,
-      },
-    });
-  }
-
-  if (b.yellingMessageCount > 0) {
-    candidates.push({
-      score: 86 + b.yellingMessageCount,
-      insight: {
-        headline: "CAPS LOCK made a cameo.",
-        subhead: `${b.yellingMessageCount.toLocaleString()} times.`,
-      },
-    });
-  }
-
-  if (b.wtfCount > 0) {
-    candidates.push({
-      score: 85 + b.wtfCount,
-      insight: {
-        headline: 'You had a few "WTF" moments.',
-        subhead: `${b.wtfCount.toLocaleString()} times.`,
-      },
-    });
-  }
-
-  if (b.pleaseCount >= 25) {
-    candidates.push({
-      score: 70 + b.pleaseCount,
-      insight: {
-        headline: hasChaos ? "Polite… until it didn’t work." : "Polite mode stayed on.",
-        subhead: `"please" × ${b.pleaseCount.toLocaleString()}`,
-      },
-    });
-  }
-
-  if (b.quickQuestionCount > 0) {
-    candidates.push({
-      score: 68 + b.quickQuestionCount,
-      insight: {
-        headline: '"Quick question" was never quick.',
-        subhead: `"quick question" × ${b.quickQuestionCount.toLocaleString()}`,
-      },
-    });
-  }
-
-  if (summary.promptLengthChangePercent != null) {
-    candidates.push({
-      score: 55 + Math.abs(summary.promptLengthChangePercent),
-      insight: {
-        headline:
-          summary.promptLengthChangePercent < 0 ? "Early-year: essays. End-of-year: commands." : "More context. More control.",
-        subhead: `Prompts got ${Math.abs(summary.promptLengthChangePercent)}% ${
-          summary.promptLengthChangePercent > 0 ? "longer" : "shorter"
-        }.`,
-      },
-    });
-  }
-
-  const topTopic = summary.topTopics[0];
-  if (topTopic) {
-    candidates.push({
-      score: 40 + topTopic.count,
-      insight: {
-        headline: topicTagline(topTopic.key),
-        subhead: `Top obsession: ${topTopic.label}.`,
-      },
-    });
-  }
-
-  if (summary.activeDays > 0) {
-    candidates.push({
-      score: 20 + summary.activeDays,
-      insight: {
-        headline: "You didn’t try AI. You lived here.",
-        subhead: `${summary.activeDays.toLocaleString()} days you showed up.`,
-      },
-    });
-  }
-
-  candidates.sort((a, c) => c.score - a.score);
-  return candidates[0]?.insight ?? { headline: "Your AI Year in Rewind.", subhead: "Private. Unfiltered. Just for fun." };
-};
-
-const closingReflectionLines = (summary: RewindSummary) => {
+const closingReflectionLines = (summary: RewindSummary, spice: SpiceLevel) => {
   const top = summary.topTopics[0]?.key;
   const lines: string[] = [];
 
-  lines.push("This wasn’t about answers. It was about control, clarity, and getting unstuck.");
+  lines.push(
+    bySpice(spice, {
+      mild: "This wasn't about answers. It was about clarity.",
+      spicy: "This wasn't about answers. It was about control, clarity, and getting unstuck.",
+      savage: "You didn't come here for magic. You came here because you were done guessing.",
+    }),
+  );
 
   switch (top) {
     case "coding":
@@ -249,16 +126,26 @@ const closingReflectionLines = (summary: RewindSummary) => {
       break;
   }
 
-  if (
+  const hasChaos =
     summary.behavior.whiplashChatCount > 0 ||
     summary.behavior.brokenCount > 0 ||
     summary.behavior.spicyWordCount > 0 ||
-    summary.behavior.yellingMessageCount > 0
-  ) {
-    lines.push("You argued with a machine. You lost sometimes. You came back anyway.");
-  } else {
-    lines.push("You used a machine to think better. That counts.");
-  }
+    summary.behavior.wtfCount > 0 ||
+    summary.behavior.yellingMessageCount > 0;
+
+  lines.push(
+    hasChaos
+      ? bySpice(spice, {
+          mild: "You had feelings. You brought them here. You still kept going.",
+          spicy: "You argued with a machine. You lost sometimes. You came back anyway.",
+          savage: "You argued with a machine. You lost sometimes. You came back anyway.",
+        })
+      : bySpice(spice, {
+          mild: "You used AI to think better. That counts.",
+          spicy: "You used a machine to think better. That counts.",
+          savage: "You didn't just use AI. You learned how to work with it.",
+        }),
+  );
 
   return lines;
 };
@@ -317,7 +204,7 @@ const renderShareCardPng = async (insight: ShareInsight) => {
 
   ctx.fillStyle = "rgba(148, 163, 184, 0.95)";
   ctx.font = "600 22px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
-  ctx.fillText("AI YEAR IN REWIND · UNFILTERED", 90, 132);
+  ctx.fillText("AI YEAR IN REWIND - UNFILTERED", 90, 132);
 
   ctx.fillStyle = "#ffffff";
   ctx.font = "800 72px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial";
@@ -358,6 +245,9 @@ export default function RewindPage() {
   const [rewind, setRewind] = useState<RewindSummary | null>(null);
   const [clientProgress, setClientProgress] = useState<RewindClientProgress | null>(null);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [spice, setSpice] = useState<SpiceLevel>("spicy");
+  const [includeSpicyWords, setIncludeSpicyWords] = useState(false);
+  const [sharePick, setSharePick] = useState(0);
 
   const [debugEnabled, setDebugEnabled] = useState(false);
 
@@ -373,12 +263,44 @@ export default function RewindPage() {
     return () => window.clearTimeout(t);
   }, [shareStatus]);
 
+  useEffect(() => {
+    if (spice === "mild") setIncludeSpicyWords(false);
+  }, [spice]);
+
+  useEffect(() => {
+    setSharePick(0);
+  }, [spice, includeSpicyWords, rewind?.totalConversations]);
+
+  const bangerPack = rewind ? generateRewindBangers(rewind, { spice, includeSpicyWords }) : null;
+  const pageBangers = bangerPack?.page ?? [];
+  const shareBangers = bangerPack?.share ?? [];
+  const currentShareBanger: RewindBanger | null =
+    shareBangers.length > 0 ? shareBangers[sharePick % shareBangers.length] : null;
+  const currentShareInsight: ShareInsight | null = currentShareBanger
+    ? { headline: currentShareBanger.line1, subhead: currentShareBanger.line2 }
+    : rewind
+      ? { headline: "Your AI Year in Rewind.", subhead: "Private. Unfiltered. Just for fun." }
+      : null;
+  const identityBanger = bangerPack?.all.find((b) => b.id === "identity") ?? null;
+  const treatedBangers = bangerPack
+    ? bangerPack.all
+        .filter((b) => ["nickname", "whiplash", "broken", "wtf", "caps", "qburst", "eburst", "swears"].includes(b.id))
+        .slice(0, 3)
+    : [];
+  const receiptBangers = pageBangers.filter((b) => b.id !== "identity").slice(0, 6);
+
   const buildShareText = (insight: ShareInsight) =>
     insight.subhead ? `${insight.headline}\n${insight.subhead}` : insight.headline;
 
+  const shuffleShare = () => {
+    if (shareBangers.length <= 1) return;
+    setSharePick((idx) => (idx + 1) % shareBangers.length);
+    setShareStatus("Shuffled.");
+  };
+
   const copyRewind = async () => {
-    if (!rewind) return;
-    const insight = pickShareInsight(rewind);
+    const insight = currentShareInsight;
+    if (!insight) return;
     try {
       await navigator.clipboard.writeText(buildShareText(insight));
       setShareStatus("Copied to clipboard.");
@@ -389,8 +311,8 @@ export default function RewindPage() {
   };
 
   const shareRewind = async () => {
-    if (!rewind) return;
-    const insight = pickShareInsight(rewind);
+    const insight = currentShareInsight;
+    if (!insight) return;
     const text = buildShareText(insight);
 
     if (typeof navigator.share === "function") {
@@ -399,9 +321,9 @@ export default function RewindPage() {
         const file = new File([png], "mindprofile-rewind.png", { type: "image/png" });
 
         if (typeof navigator.canShare === "function" && navigator.canShare({ files: [file] })) {
-          await navigator.share({ title: "AI Year in Rewind — Unfiltered", text: insight.headline, files: [file] });
+          await navigator.share({ title: "AI Year in Rewind - Unfiltered", text, files: [file] });
         } else {
-          await navigator.share({ title: "AI Year in Rewind — Unfiltered", text });
+          await navigator.share({ title: "AI Year in Rewind - Unfiltered", text });
         }
         setShareStatus("Shared.");
         return;
@@ -429,6 +351,8 @@ export default function RewindPage() {
     setRewind(null);
     setClientProgress(null);
     setShareStatus(null);
+    setSharePick(0);
+    setIncludeSpicyWords(false);
   };
 
   const shouldProcessLocally = (candidate: File) => candidate.size > 4 * 1024 * 1024;
@@ -534,6 +458,8 @@ export default function RewindPage() {
     setShowDebug(false);
     setClientProgress(null);
     setShareStatus(null);
+    setSharePick(0);
+    setIncludeSpicyWords(false);
   };
 
   return (
@@ -676,13 +602,14 @@ export default function RewindPage() {
                     </div>
                   </div>
 
-                  <p className="muted mt-4 text-sm text-slate-100">
-                    {rewind.activeDays >= 260
-                      ? 'You didn’t "try" AI. You lived here.'
-                      : rewind.activeDays >= 120
-                        ? "Not casual. Not random. You came back when it mattered."
-                        : "You dropped in when you needed a second brain."}
-                  </p>
+                  {identityBanger && (
+                    <p className="mt-4 text-sm text-slate-100">
+                      <b>{identityBanger.line1}</b>
+                      {identityBanger.line2 && (
+                        <span className="muted mt-2 block text-xs text-slate-200">{identityBanger.line2}</span>
+                      )}
+                    </p>
+                  )}
 
                   {rewind.topTopics[0] && (
                     <p className="mt-3 text-sm text-slate-100">
@@ -698,25 +625,67 @@ export default function RewindPage() {
                   )}
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={shareRewind}
-                    className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-5 py-2 text-sm font-semibold text-emerald-50 hover:border-emerald-300/80 hover:bg-emerald-300/20"
-                  >
-                    Share
-                  </button>
-                  <button
-                    type="button"
-                    onClick={copyRewind}
-                    className="rounded-full border border-white/15 bg-white/5 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-300/60 hover:bg-white/10"
-                  >
-                    Copy
-                  </button>
+                <div className="flex flex-col gap-3 sm:items-end">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={shareRewind}
+                      className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-5 py-2 text-sm font-semibold text-emerald-50 hover:border-emerald-300/80 hover:bg-emerald-300/20"
+                    >
+                      Share
+                    </button>
+                    <button
+                      type="button"
+                      onClick={copyRewind}
+                      className="rounded-full border border-white/15 bg-white/5 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-300/60 hover:bg-white/10"
+                    >
+                      Copy
+                    </button>
+                    <button
+                      type="button"
+                      onClick={shuffleShare}
+                      disabled={shareBangers.length <= 1}
+                      className="rounded-full border border-white/15 bg-white/5 px-5 py-2 text-sm font-semibold text-slate-100 hover:border-emerald-300/60 hover:bg-white/10 disabled:opacity-50"
+                    >
+                      Shuffle
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-200">
+                      Spice level
+                    </span>
+                    <div className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1">
+                      {(["mild", "spicy", "savage"] as const).map((level) => (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setSpice(level)}
+                          className={
+                            level === spice
+                              ? "rounded-full bg-emerald-300/25 px-3 py-1 text-xs font-semibold text-emerald-50"
+                              : "rounded-full px-3 py-1 text-xs font-semibold text-slate-200 hover:bg-white/10"
+                          }
+                        >
+                          {level === "mild" ? "Mild" : level === "spicy" ? "Spicy" : "Savage"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {shareStatus && <p className="mt-3 text-xs text-emerald-200">{shareStatus}</p>}
+
+              {currentShareBanger && (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Share card</div>
+                  <p className="mt-3 text-base font-semibold text-white">{currentShareBanger.line1}</p>
+                  {currentShareBanger.line2 && (
+                    <p className="muted mt-2 text-xs text-slate-200">{currentShareBanger.line2}</p>
+                  )}
+                </div>
+              )}
 
               <div className="mt-6 grid gap-3 sm:grid-cols-3">
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -830,91 +799,19 @@ export default function RewindPage() {
               </div>
               <p className="muted mt-3 text-sm text-slate-100">Not judging. Just holding up the mirror.</p>
 
-              <ul className="mt-5 space-y-3 text-sm text-slate-100">
-                {(() => {
-                  const b = rewind.behavior;
-                  const items: Array<{ key: string; node: ReactNode }> = [];
-
-                  if (b.whiplashChatCount > 0) {
-                    items.push({
-                      key: "whiplash",
-                      node: (
-                        <span>
-                          You snapped. Then you said sorry. Then you asked for help again.{" "}
-                          <span className="muted text-xs text-slate-200">
-                            ({b.whiplashChatCount.toLocaleString()} chats)
-                          </span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.spicyWordCount > 0) {
-                    items.push({
-                      key: "spicy",
-                      node: (
-                        <span>
-                          You got spicy <b>{b.spicyWordCount.toLocaleString()}</b> times. Still wanted answers.
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.yellingMessageCount > 0) {
-                    items.push({
-                      key: "caps",
-                      node: (
-                        <span>
-                          CAPS LOCK made a cameo.{" "}
-                          <span className="muted text-xs text-slate-200">
-                            ({b.yellingMessageCount.toLocaleString()} times)
-                          </span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.brokenCount > 0) {
-                    items.push({
-                      key: "broken",
-                      node: (
-                        <span>
-                          You went straight to <b>"why is this broken"</b> mode.{" "}
-                          <span className="muted text-xs text-slate-200">
-                            ({b.brokenCount.toLocaleString()} times)
-                          </span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.wtfCount > 0) {
-                    items.push({
-                      key: "wtf",
-                      node: (
-                        <span>
-                          You had a few <b>"WTF"</b> moments.{" "}
-                          <span className="muted text-xs text-slate-200">
-                            ({b.wtfCount.toLocaleString()} times)
-                          </span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (items.length === 0) {
-                    items.push({
-                      key: "calm",
-                      node: <span>You kept it surprisingly civil. Still demanding. Still curious.</span>,
-                    });
-                  }
-
-                  return items.slice(0, 4).map((it) => (
-                    <li key={it.key} className="leading-relaxed">
-                      {it.node}
+              <ul className="mt-5 space-y-4 text-sm text-slate-100">
+                {treatedBangers.length > 0 ? (
+                  treatedBangers.map((banger) => (
+                    <li key={banger.id} className="leading-relaxed">
+                      <span>
+                        {banger.line1}{" "}
+                        {banger.line2 && <span className="muted text-xs text-slate-200">{banger.line2}</span>}
+                      </span>
                     </li>
-                  ));
-                })()}
+                  ))
+                ) : (
+                  <li className="leading-relaxed">You kept it surprisingly civil. Still demanding. Still curious.</li>
+                )}
               </ul>
             </div>
 
@@ -922,156 +819,39 @@ export default function RewindPage() {
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                 Receipts
               </div>
-              <p className="muted mt-3 text-sm text-slate-100">
-                We brought evidence.
-              </p>
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="muted text-sm text-slate-100">We brought evidence.</p>
+                <label className="flex items-center gap-2 text-xs text-slate-200">
+                  <input
+                    type="checkbox"
+                    checked={includeSpicyWords}
+                    onChange={(e) => setIncludeSpicyWords(e.currentTarget.checked)}
+                    disabled={spice === "mild" || rewind.nicknames.length === 0}
+                    className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                  />
+                  Include the spicy words I used
+                </label>
+              </div>
 
               <ul className="mt-5 space-y-3 text-sm text-slate-100">
-                {(() => {
-                  const b = rewind.behavior;
-                  const hasChaos =
-                    b.spicyWordCount > 0 || b.brokenCount > 0 || b.wtfCount > 0 || b.yellingMessageCount > 0;
-                  const items: Array<{ key: string; node: ReactNode }> = [];
-
-                  if (b.whiplashChatCount > 0) {
-                    items.push({
-                      key: "whiplash",
-                      node: (
-                        <span>
-                          You snapped, apologized, and kept going.{" "}
-                          <span className="muted text-xs text-slate-200">({b.whiplashChatCount.toLocaleString()} chats)</span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.wtfCount > 0) {
-                    items.push({
-                      key: "wtf",
-                      node: (
-                        <span>
-                          You had a few <b>"WTF"</b> moments.{" "}
-                          <span className="muted text-xs text-slate-200">({b.wtfCount.toLocaleString()} times)</span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.spicyWordCount > 0) {
-                    items.push({
-                      key: "spicy",
-                      node: (
-                        <span>
-                          You got spicy. Then you asked for help anyway.{" "}
-                          <span className="muted text-xs text-slate-200">({b.spicyWordCount.toLocaleString()} times)</span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.yellingMessageCount > 0) {
-                    items.push({
-                      key: "caps",
-                      node: (
-                        <span>
-                          CAPS LOCK made a cameo.{" "}
-                          <span className="muted text-xs text-slate-200">
-                            ({b.yellingMessageCount.toLocaleString()} times)
-                          </span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.stepByStepCount > 0 && b.brokenCount > 0) {
-                    items.push({
-                      key: "stepbroken",
-                      node: (
-                        <span>
-                          You love <b>"step by step"</b> until it’s <b>"why is this broken"</b>.{" "}
-                          <span className="muted text-xs text-slate-200">
-                            ("step by step" × {b.stepByStepCount.toLocaleString()}, "broken" ×{" "}
-                            {b.brokenCount.toLocaleString()})
-                          </span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.pleaseCount > 0) {
-                    items.push({
-                      key: "please",
-                      node: (
-                        <span>
-                          You said <b>"please"</b> {b.pleaseCount.toLocaleString()} times.{" "}
-                          {hasChaos ? "Polite… until it didn’t work." : "Polite mode stayed on."}{" "}
-                          <span className="muted text-xs text-slate-200">("please" × {b.pleaseCount.toLocaleString()})</span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.quickQuestionCount > 0) {
-                    items.push({
-                      key: "quick",
-                      node: (
-                        <span>
-                          You said <b>"quick question"</b> {b.quickQuestionCount.toLocaleString()} times. None were quick.{" "}
-                          <span className="muted text-xs text-slate-200">
-                            ("quick question" × {b.quickQuestionCount.toLocaleString()})
-                          </span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.canYouCount > 0) {
-                    items.push({
-                      key: "canyou",
-                      node: (
-                        <span>
-                          You opened with <b>"can you"</b> like it was a spell.{" "}
-                          <span className="muted text-xs text-slate-200">("can you" × {b.canYouCount.toLocaleString()})</span>
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (b.sorryCount > 0) {
-                    items.push({
-                      key: "sorry",
-                      node: (
-                        <span>
-                          You said sorry <b>{b.sorryCount.toLocaleString()}</b> times. Character development.
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (rewind.topWord && !BORING_TOP_WORDS.has(rewind.topWord.toLowerCase())) {
-                    items.push({
-                      key: "topword",
-                      node: (
-                        <span>
-                          Word you couldn’t quit: <b>{rewind.topWord}</b>.
-                        </span>
-                      ),
-                    });
-                  }
-
-                  if (items.length === 0) {
-                    items.push({
-                      key: "fallback",
-                      node: <span>You kept it weirdly balanced. No single habit took over.</span>,
-                    });
-                  }
-
-                  return items.slice(0, 7).map((it) => (
-                    <li key={it.key} className="leading-relaxed">
-                      {it.node}
+                {receiptBangers.length > 0 ? (
+                  receiptBangers.map((banger) => (
+                    <li key={banger.id} className="leading-relaxed">
+                      <span>
+                        {banger.line1}{" "}
+                        {banger.line2 && <span className="muted text-xs text-slate-200">{banger.line2}</span>}
+                      </span>
                     </li>
-                  ));
-                })()}
+                  ))
+                ) : (
+                  <li className="leading-relaxed">
+                    {bySpice(spice, {
+                      mild: "Mostly wholesome. Mild chaos, at worst.",
+                      spicy: "Nothing too chaotic. Respect.",
+                      savage: "You were annoyingly reasonable. Congrats.",
+                    })}
+                  </li>
+                )}
               </ul>
             </div>
 
@@ -1111,7 +891,7 @@ export default function RewindPage() {
                 So… what was this really about?
               </div>
               <div className="mt-4 grid gap-2 text-sm text-slate-100">
-                {closingReflectionLines(rewind).map((line) => (
+                {closingReflectionLines(rewind, spice).map((line) => (
                   <p key={line}>{line}</p>
                 ))}
               </div>

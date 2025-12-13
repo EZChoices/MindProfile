@@ -40,11 +40,23 @@ const isBehavior = (value: unknown) => {
     isFiniteNumber(value.canYouCount) &&
     isFiniteNumber(value.stepByStepCount) &&
     isFiniteNumber(value.quickQuestionCount) &&
+    isFiniteNumber(value.realQuickCount) &&
+    isFiniteNumber(value.simpleQuestionCount) &&
     isFiniteNumber(value.brokenCount) &&
+    isFiniteNumber(value.whyBrokenCount) &&
+    isFiniteNumber(value.doesntWorkCount) &&
     isFiniteNumber(value.wtfCount) &&
     isFiniteNumber(value.spicyWordCount) &&
+    isFiniteNumber(value.swearCount) &&
     isFiniteNumber(value.yellingMessageCount) &&
-    isFiniteNumber(value.whiplashChatCount)
+    isFiniteNumber(value.whiplashChatCount) &&
+    isFiniteNumber(value.rageMessageCount) &&
+    isFiniteNumber(value.questionBurstMessageCount) &&
+    isFiniteNumber(value.exclaimBurstMessageCount) &&
+    isFiniteNumber(value.againCount) &&
+    isFiniteNumber(value.stillCount) &&
+    isFiniteNumber(value.quickQuestionChatCount) &&
+    isFiniteNumber(value.quickQuestionChatAvgPrompts)
   );
 };
 
@@ -63,6 +75,8 @@ const isRewindSummary = (value: unknown): value is RewindSummary => {
     (value.topWord === null || typeof value.topWord === "string") &&
     Array.isArray(value.frequentPhrases) &&
     value.frequentPhrases.every(isPhraseInsight) &&
+    Array.isArray(value.nicknames) &&
+    value.nicknames.every(isPhraseInsight) &&
     isNullableNumber(value.longestPromptChars) &&
     isNullableNumber(value.avgPromptChars) &&
     isNullableNumber(value.promptLengthChangePercent) &&

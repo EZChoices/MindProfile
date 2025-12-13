@@ -17,6 +17,22 @@ const NAME_STOPWORDS = new Set([
   "AI",
   "LLM",
   "MindProfile",
+  "Wtf",
+  "Toaster",
+  "Idiot",
+  "Useless",
+  "Stupid",
+  "Dumb",
+  "Garbage",
+  "Trash",
+  "Clown",
+  "Bot",
+  "Npc",
+  "Moron",
+  "Fuck",
+  "Fucking",
+  "Shit",
+  "Damn",
 ]);
 
 const compressWhitespace = (text: string) =>
