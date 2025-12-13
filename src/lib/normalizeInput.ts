@@ -51,7 +51,7 @@ export const normalizeUrlInput = (rawText: string, url: string): NormalizedInput
     normalizedText,
     inputCharCount: normalizedText.length,
     sourceMode: "url",
-    inputSourceHost: url || host,
+    inputSourceHost: host,
     userMessageCount: estimateUserMessageCount(normalizedText),
   };
 };

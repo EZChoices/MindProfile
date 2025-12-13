@@ -351,14 +351,14 @@ export async function POST(request: Request) {
       const collected: string[] = [];
       const lengths: number[] = [];
 
-      const perUrlMeta: Array<{ url: string; status?: number; extractedLength?: number; reason?: string }> = [];
+      const perUrlMeta: Array<{ host: string | null; status?: number; extractedLength?: number; reason?: string }> = [];
 
       for (const rawUrl of shareUrls) {
         let parsedUrl: URL;
         try {
           parsedUrl = new URL(rawUrl);
         } catch {
-          perUrlMeta.push({ url: rawUrl, reason: "invalid_url" });
+          perUrlMeta.push({ host: null, reason: "invalid_url" });
           continue;
         }
 
@@ -379,25 +379,25 @@ export async function POST(request: Request) {
           const cookieHeader = isChatGptShare ? buildCookieHeader(res.headers.get("set-cookie")) : null;
           let extractedShare = isChatGptShare ? extractChatGptShareTextFromData(nextData) : null;
           if (!extractedShare && isChatGptShare) {
-            console.warn("ChatGPT share page missing embedded conversation, trying data endpoint", { url: rawUrl });
+            console.warn("ChatGPT share page missing embedded conversation, trying data endpoint", { host });
             extractedShare = await fetchChatGptShareTextFromDataEndpoint(parsedUrl, buildId, cookieHeader);
           }
           if (!extractedShare && isChatGptShare) {
-            console.warn("ChatGPT share content unavailable after data endpoint, trying backend-api/share", { url: rawUrl });
+            console.warn("ChatGPT share content unavailable after data endpoint, trying backend-api/share", { host });
             extractedShare = await fetchChatGptShareTextFromShareApi(parsedUrl, cookieHeader);
           }
           if (!extractedShare && isChatGptShare) {
-            console.warn("ChatGPT share content unavailable after extraction attempts", { url: rawUrl });
+            console.warn("ChatGPT share content unavailable after extraction attempts", { host });
           }
           const extracted = extractedShare || extractTextFromHtml(html);
           if (extracted && extracted.length >= 50 && !looksLikeBoilerplate(extracted)) {
             const trimmed = extracted.trim();
             collected.push(trimmed);
             lengths.push(trimmed.length);
-            perUrlMeta.push({ url: rawUrl, status: res.status, extractedLength: trimmed.length });
+            perUrlMeta.push({ host, status: res.status, extractedLength: trimmed.length });
           } else {
             perUrlMeta.push({
-              url: rawUrl,
+              host,
               status: res.status,
               extractedLength: extracted?.length ?? 0,
               reason: "boilerplate_or_short",
@@ -405,11 +405,21 @@ export async function POST(request: Request) {
           }
         } catch (error) {
           console.error("Failed to fetch shared URL", error);
-          perUrlMeta.push({ url: rawUrl, reason: "fetch_failed" });
+          perUrlMeta.push({ host: null, reason: "fetch_failed" });
         }
       }
 
       if (collected.length === 0) {
+        const shareHosts = shareUrls
+          .map((u) => {
+            try {
+              return new URL(u).hostname;
+            } catch {
+              return null;
+            }
+          })
+          .filter((h): h is string => typeof h === "string" && h.trim().length > 0);
+
         await logAnalysisError({
           clientId,
           sourceMode: "url",
@@ -417,7 +427,7 @@ export async function POST(request: Request) {
           errorCode: "url_boilerplate_or_empty",
           message: "Share URL text looks like boilerplate/too short",
           meta: {
-            shareUrls,
+            shareHosts,
             lengths,
             sample: "",
             perUrlMeta,
@@ -429,6 +439,16 @@ export async function POST(request: Request) {
 
       const combined = collected.join("\n\n---\n\n").trim();
       if (!combined) {
+        const shareHosts = shareUrls
+          .map((u) => {
+            try {
+              return new URL(u).hostname;
+            } catch {
+              return null;
+            }
+          })
+          .filter((h): h is string => typeof h === "string" && h.trim().length > 0);
+
         await logAnalysisError({
           clientId,
           sourceMode: "url",
@@ -436,7 +456,7 @@ export async function POST(request: Request) {
           errorCode: "url_boilerplate_or_empty",
           message: "Share URL text looks like boilerplate/too short",
           meta: {
-            shareUrls,
+            shareHosts,
             lengths,
             sample: combined.slice(0, 200),
             perUrlMeta,

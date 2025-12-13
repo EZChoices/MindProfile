@@ -28,10 +28,10 @@ export async function GET(request: NextRequest) {
   });
 
   const shaped = logs.map((log) => {
-    const meta = log.meta as unknown as { shareUrls?: string[] } | null;
+    const meta = log.meta as unknown as { shareHosts?: string[] } | null;
     return {
       ...log,
-      shareUrls: Array.isArray(meta?.shareUrls) ? meta?.shareUrls : [],
+      shareHosts: Array.isArray(meta?.shareHosts) ? meta?.shareHosts : [],
     };
   });
 

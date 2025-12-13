@@ -120,6 +120,14 @@ export function generateRewindBangers(
   const includeSpicyWords = Boolean(options.includeSpicyWords) && spice !== "mild";
 
   const b = summary.behavior;
+  const wrapped = summary.wrapped;
+  const topProject = wrapped.projects[0] ?? null;
+  const projectCount = wrapped.projects.length;
+  const topBoss = wrapped.bossFights[0] ?? null;
+  const weirdRabbit = wrapped.weirdRabbitHole ?? null;
+  const villainMonth = wrapped.timeline.villainMonth;
+  const mostChaoticWeek = wrapped.timeline.mostChaoticWeek;
+  const longestStreakDays = wrapped.timeline.longestStreakDays;
   const promptsPerChat =
     summary.totalConversations > 0 ? Math.round(summary.totalUserMessages / summary.totalConversations) : 0;
   const hasChaos =
@@ -169,6 +177,95 @@ export function generateRewindBangers(
       line1: identity,
       line2: `${formatCount(summary.activeDays)} days you showed up.`,
       score: 30 + scoreFromCount(summary.activeDays) + scoreFromLength(identity),
+    });
+  }
+
+  // Top builds / brag line.
+  if (projectCount > 0) {
+    const line1 = bySpice(spice, {
+      mild: `You built ${formatCount(projectCount)} different things.`,
+      spicy: `You built ${formatCount(projectCount)} different things. Not casual.`,
+      savage: `You built ${formatCount(projectCount)} different things. Then you came back for more.`,
+    });
+    add({
+      id: "projects",
+      category: "projects",
+      line1,
+      line2: topProject ? `Top build: ${topProject.projectLabel}.` : undefined,
+      score: 88 + scoreFromCount(projectCount) + scoreFromLength(line1),
+    });
+  }
+
+  // Boss fight callout.
+  if (topBoss && topBoss.count > 0) {
+    const line1 = bySpice(spice, {
+      mild: `Biggest boss fight: ${topBoss.title}.`,
+      spicy: `Biggest boss fight: ${topBoss.title}.`,
+      savage: `Your biggest enemy: ${topBoss.example}.`,
+    });
+    add({
+      id: "boss",
+      category: "boss",
+      line1,
+      line2: `(${formatCount(topBoss.count)}x)`,
+      score: 84 + scoreFromCount(topBoss.count) + scoreFromLength(line1),
+    });
+  }
+
+  // Weird rabbit hole.
+  if (weirdRabbit) {
+    const line1 = bySpice(spice, {
+      mild: weirdRabbit.title + ".",
+      spicy: `${weirdRabbit.title}: ${weirdRabbit.detail}`,
+      savage: `${weirdRabbit.title}: ${weirdRabbit.detail}`,
+    });
+    add({
+      id: "weird",
+      category: "weird",
+      line1,
+      score: 58 + scoreFromLength(line1),
+    });
+  }
+
+  // Villain era (month or week).
+  if (mostChaoticWeek) {
+    const line1 = bySpice(spice, {
+      mild: `${mostChaoticWeek}. Busy week.`,
+      spicy: `${mostChaoticWeek}. You were on one.`,
+      savage: `${mostChaoticWeek}. Absolute cinema.`,
+    });
+    add({
+      id: "chaoticweek",
+      category: "timeline",
+      line1,
+      score: 52 + scoreFromLength(line1),
+    });
+  } else if (villainMonth) {
+    const line1 = bySpice(spice, {
+      mild: `${villainMonth} was your busiest vibe.`,
+      spicy: `${villainMonth} was unhinged.`,
+      savage: `${villainMonth} was a villain era.`,
+    });
+    add({
+      id: "villainmonth",
+      category: "timeline",
+      line1,
+      score: 52 + scoreFromLength(line1),
+    });
+  }
+
+  // Streak.
+  if (longestStreakDays != null && longestStreakDays >= 7) {
+    const line1 = bySpice(spice, {
+      mild: `Longest streak: ${formatCount(longestStreakDays)} days.`,
+      spicy: `Longest streak: ${formatCount(longestStreakDays)} days. Not a phase.`,
+      savage: `Longest streak: ${formatCount(longestStreakDays)} days. Addiction (productive).`,
+    });
+    add({
+      id: "streak",
+      category: "timeline",
+      line1,
+      score: 58 + scoreFromCount(longestStreakDays) + scoreFromLength(line1),
     });
   }
 
@@ -444,10 +541,69 @@ export function generateRewindBangers(
     });
   }
 
+  // Forecast (safe and short).
+  if (wrapped.forecast.length > 0) {
+    const line1 = wrapped.forecast[0];
+    add({
+      id: "forecast",
+      category: "forecast",
+      line1,
+      line2: "(2026 forecast)",
+      score: 54 + scoreFromLength(line1),
+    });
+  }
+
+  // Closing line (shareable closer).
+  if (wrapped.closingLine && wrapped.closingLine.trim().length) {
+    const line1 = wrapped.closingLine.trim();
+    add({
+      id: "closing",
+      category: "closing",
+      line1,
+      score: 50 + scoreFromLength(line1),
+    });
+  }
+
   // Sort and pick.
   candidates.sort((a, c) => c.score - a.score);
 
-  const share = candidates.filter((c) => c.shareable).slice(0, 3);
+  const sharePool = candidates
+    .filter((c) => c.shareable)
+    .filter((c) => {
+      if (spice === "mild") {
+        return !["nickname", "rage", "whiplash"].includes(c.category);
+      }
+      return true;
+    });
+
+  const used = new Set<string>();
+  const pick = (predicate: (b: RewindBanger) => boolean) => {
+    const found = sharePool.find((b) => !used.has(b.id) && predicate(b));
+    if (!found) return null;
+    used.add(found.id);
+    return found;
+  };
+
+  const share: RewindBanger[] = [];
+
+  if (spice === "mild") {
+    const first = pick((b) => ["projects", "identity"].includes(b.category)) ?? pick(() => true);
+    if (first) share.push(first);
+    const second = pick((b) => ["growth", "forecast", "timeline", "weird", "rhythm"].includes(b.category)) ?? pick(() => true);
+    if (second) share.push(second);
+    const third = pick((b) => ["topics", "style"].includes(b.category)) ?? pick(() => true);
+    if (third) share.push(third);
+  } else {
+    const first =
+      pick((b) => ["whiplash", "nickname", "rage", "quick", "contradiction", "boss"].includes(b.category)) ??
+      pick(() => true);
+    if (first) share.push(first);
+    const second = pick((b) => ["projects", "identity"].includes(b.category)) ?? pick(() => true);
+    if (second) share.push(second);
+    const third = pick((b) => ["growth", "forecast", "timeline", "weird"].includes(b.category)) ?? pick(() => true);
+    if (third) share.push(third);
+  }
+
   const page = candidates.slice(0, 7);
 
   return { page, share, all: candidates };

@@ -60,6 +60,109 @@ const isBehavior = (value: unknown) => {
   );
 };
 
+const isConversationSummary = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    isNullableString(value.topicKey) &&
+    isNullableString(value.themeKey) &&
+    isNullableString(value.month) &&
+    typeof value.oneLineSummary === "string" &&
+    isFiniteNumber(value.userMessages) &&
+    isFiniteNumber(value.avgPromptChars) &&
+    isFiniteNumber(value.maxPromptChars) &&
+    isNullableNumber(value.durationMins) &&
+    typeof value.intent === "string" &&
+    typeof value.deliverable === "string" &&
+    typeof value.mood === "string" &&
+    Array.isArray(value.tags) &&
+    value.tags.every((t: unknown) => typeof t === "string") &&
+    Array.isArray(value.stack) &&
+    value.stack.every((t: unknown) => typeof t === "string") &&
+    isFiniteNumber(value.winSignals) &&
+    isFiniteNumber(value.frictionSignals) &&
+    isFiniteNumber(value.indecisionSignals) &&
+    typeof value.comeback === "boolean"
+  );
+};
+
+const isProjectSummary = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.projectLabel === "string" &&
+    typeof value.whatYouBuilt === "string" &&
+    Array.isArray(value.stack) &&
+    value.stack.every((t: unknown) => typeof t === "string") &&
+    Array.isArray(value.monthsActive) &&
+    value.monthsActive.every((t: unknown) => typeof t === "string") &&
+    isFiniteNumber(value.chats) &&
+    isFiniteNumber(value.prompts) &&
+    typeof value.intensity === "string" &&
+    typeof value.statusGuess === "string"
+  );
+};
+
+const isBossFight = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return typeof value.title === "string" && isFiniteNumber(value.count) && typeof value.example === "string";
+};
+
+const isWrapped = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  const archetype = value.archetype;
+  const hook = value.hook;
+  const timeline = value.timeline;
+
+  const isArchetype =
+    isRecord(archetype) &&
+    typeof archetype.key === "string" &&
+    typeof archetype.title === "string" &&
+    typeof archetype.line === "string";
+
+  const isHook =
+    isRecord(hook) &&
+    typeof hook.identity === "string" &&
+    typeof hook.brag === "string" &&
+    typeof hook.roast === "string";
+
+  const isTimeline =
+    isRecord(timeline) &&
+    Array.isArray(timeline.flowMonths) &&
+    timeline.flowMonths.every((m: unknown) => typeof m === "string") &&
+    Array.isArray(timeline.frictionMonths) &&
+    timeline.frictionMonths.every((m: unknown) => typeof m === "string") &&
+    isNullableString(timeline.villainMonth) &&
+    isNullableNumber(timeline.longestStreakDays) &&
+    isNullableString(timeline.mostIndecisiveMonth) &&
+    isNullableString(timeline.mostActiveWeek) &&
+    isNullableString(timeline.mostChaoticWeek);
+
+  return (
+    isArchetype &&
+    isHook &&
+    Array.isArray(value.projects) &&
+    value.projects.every(isProjectSummary) &&
+    Array.isArray(value.bossFights) &&
+    value.bossFights.every(isBossFight) &&
+    Array.isArray(value.wins) &&
+    value.wins.every(
+      (w: unknown) =>
+        isRecord(w) && typeof w.title === "string" && isFiniteNumber(w.count),
+    ) &&
+    (value.comebackMoment === null ||
+      (isRecord(value.comebackMoment) &&
+        typeof value.comebackMoment.title === "string" &&
+        typeof value.comebackMoment.detail === "string")) &&
+    isTimeline &&
+    (value.weirdRabbitHole === null ||
+      (isRecord(value.weirdRabbitHole) &&
+        typeof value.weirdRabbitHole.title === "string" &&
+        typeof value.weirdRabbitHole.detail === "string")) &&
+    Array.isArray(value.forecast) &&
+    value.forecast.every((l: unknown) => typeof l === "string") &&
+    typeof value.closingLine === "string"
+  );
+};
+
 const isRewindSummary = (value: unknown): value is RewindSummary => {
   if (!isRecord(value)) return false;
 
@@ -80,7 +183,10 @@ const isRewindSummary = (value: unknown): value is RewindSummary => {
     isNullableNumber(value.longestPromptChars) &&
     isNullableNumber(value.avgPromptChars) &&
     isNullableNumber(value.promptLengthChangePercent) &&
-    isBehavior(value.behavior)
+    isBehavior(value.behavior) &&
+    Array.isArray(value.conversations) &&
+    value.conversations.every(isConversationSummary) &&
+    isWrapped(value.wrapped)
   );
 };
 

@@ -203,10 +203,10 @@ export default async function AdminProfilesPage({
               </thead>
               <tbody>
                 {logs.map((log) => {
-                  const meta = (log.meta ?? {}) as { shareUrls?: unknown };
-                  const shareUrls =
-                    Array.isArray(meta.shareUrls) && meta.shareUrls.length
-                      ? meta.shareUrls.filter((u): u is string => typeof u === "string" && u.trim().length > 0)
+                  const meta = (log.meta ?? {}) as { shareHosts?: unknown };
+                  const shareHosts =
+                    Array.isArray(meta.shareHosts) && meta.shareHosts.length
+                      ? meta.shareHosts.filter((h): h is string => typeof h === "string" && h.trim().length > 0)
                       : [];
                   const metaStr = JSON.stringify(log.meta ?? {});
                   const truncatedMeta = metaStr.length > 120 ? `${metaStr.slice(0, 120)}.` : metaStr;
@@ -223,14 +223,12 @@ export default async function AdminProfilesPage({
                         {log.message ?? "-"}
                       </td>
                       <td className="px-3 py-2 text-slate-400 truncate max-w-[240px]" title={metaStr}>
-                        {shareUrls.length > 0 ? (
+                        {shareHosts.length > 0 ? (
                           <span className="flex flex-wrap gap-1">
-                            {shareUrls.map((u, i) => (
-                              <span key={`${log.id}-url-${i}`} className="flex items-center gap-1">
+                            {shareHosts.map((h, i) => (
+                              <span key={`${log.id}-host-${i}`} className="flex items-center gap-1">
                                 {i > 0 && <span>,</span>}
-                                <a href={u} className="text-emerald-200 underline" target="_blank" rel="noreferrer">
-                                  link {i + 1}
-                                </a>
+                                <span className="text-slate-200">{h}</span>
                               </span>
                             ))}
                           </span>

@@ -69,15 +69,6 @@ const topicTagline = (key: string | undefined) => {
   }
 };
 
-const timeOfDayLabel = (hour: number) => {
-  if (hour >= 5 && hour <= 8) return "early mornings";
-  if (hour >= 9 && hour <= 11) return "late mornings";
-  if (hour >= 12 && hour <= 14) return "early afternoons";
-  if (hour >= 15 && hour <= 17) return "late afternoons";
-  if (hour >= 18 && hour <= 21) return "evenings";
-  return "late nights";
-};
-
 const primeTimeRoast = (hour: number) => {
   if (hour >= 5 && hour <= 8) return "Fresh brain. Zero distractions.";
   if (hour >= 9 && hour <= 11) return "Coffee in. Brain online.";
@@ -247,6 +238,8 @@ export default function RewindPage() {
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [spice, setSpice] = useState<SpiceLevel>("spicy");
   const [includeSpicyWords, setIncludeSpicyWords] = useState(false);
+  const [includeExamples, setIncludeExamples] = useState(true);
+  const [allowRedactedExcerpts, setAllowRedactedExcerpts] = useState(false);
   const [sharePick, setSharePick] = useState(0);
 
   const [debugEnabled, setDebugEnabled] = useState(false);
@@ -272,7 +265,6 @@ export default function RewindPage() {
   }, [spice, includeSpicyWords, rewind?.totalConversations]);
 
   const bangerPack = rewind ? generateRewindBangers(rewind, { spice, includeSpicyWords }) : null;
-  const pageBangers = bangerPack?.page ?? [];
   const shareBangers = bangerPack?.share ?? [];
   const currentShareBanger: RewindBanger | null =
     shareBangers.length > 0 ? shareBangers[sharePick % shareBangers.length] : null;
@@ -281,13 +273,47 @@ export default function RewindPage() {
     : rewind
       ? { headline: "Your AI Year in Rewind.", subhead: "Private. Unfiltered. Just for fun." }
       : null;
-  const identityBanger = bangerPack?.all.find((b) => b.id === "identity") ?? null;
   const treatedBangers = bangerPack
     ? bangerPack.all
-        .filter((b) => ["nickname", "whiplash", "broken", "wtf", "caps", "qburst", "eburst", "swears"].includes(b.id))
+        .filter((b) => ["nickname", "whiplash", "rage"].includes(b.category))
         .slice(0, 3)
     : [];
-  const receiptBangers = pageBangers.filter((b) => b.id !== "identity").slice(0, 6);
+  const receiptBangers = bangerPack
+    ? bangerPack.all
+        .filter((b) =>
+          ["nickname", "whiplash", "politeness", "quick", "contradiction", "rage", "style", "rhythm"].includes(b.category),
+        )
+        .slice(0, 6)
+    : [];
+
+  const momentLines = (() => {
+    if (!rewind || !allowRedactedExcerpts) return [];
+    const picked: string[] = [];
+    const seen = new Set<string>();
+
+    const add = (predicate: (c: RewindSummary["conversations"][number]) => boolean) => {
+      const found = rewind.conversations.find((c) => predicate(c) && c.oneLineSummary && !seen.has(c.oneLineSummary));
+      if (!found) return;
+      seen.add(found.oneLineSummary);
+      picked.push(found.oneLineSummary.length > 140 ? found.oneLineSummary.slice(0, 137) + "…" : found.oneLineSummary);
+    };
+
+    add((c) => c.comeback);
+    add((c) => c.mood === "flow");
+    add((c) => c.mood === "frustrated");
+
+    if (picked.length < 3) {
+      const sorted = [...rewind.conversations].sort((a, b) => b.userMessages - a.userMessages);
+      for (const c of sorted) {
+        if (!c.oneLineSummary || seen.has(c.oneLineSummary)) continue;
+        seen.add(c.oneLineSummary);
+        picked.push(c.oneLineSummary.length > 140 ? c.oneLineSummary.slice(0, 137) + "…" : c.oneLineSummary);
+        if (picked.length >= 3) break;
+      }
+    }
+
+    return picked.slice(0, 3);
+  })();
 
   const buildShareText = (insight: ShareInsight) =>
     insight.subhead ? `${insight.headline}\n${insight.subhead}` : insight.headline;
@@ -353,6 +379,8 @@ export default function RewindPage() {
     setShareStatus(null);
     setSharePick(0);
     setIncludeSpicyWords(false);
+    setIncludeExamples(true);
+    setAllowRedactedExcerpts(false);
   };
 
   const shouldProcessLocally = (candidate: File) => candidate.size > 4 * 1024 * 1024;
@@ -460,6 +488,8 @@ export default function RewindPage() {
     setShareStatus(null);
     setSharePick(0);
     setIncludeSpicyWords(false);
+    setIncludeExamples(true);
+    setAllowRedactedExcerpts(false);
   };
 
   return (
@@ -476,7 +506,7 @@ export default function RewindPage() {
             This is the part where you get called out.
           </p>
           <p className="muted text-sm text-slate-200">
-            It takes about 2 minutes. Nothing is uploaded. Nothing is shared.
+            It takes about 2 minutes. Your export stays on this device. We only save a redacted summary (no raw chats).
           </p>
         </header>
 
@@ -531,7 +561,7 @@ export default function RewindPage() {
                   Processing on this device
                 </div>
                 <p className="muted mt-2 text-xs">
-                  Nothing is uploaded. Big exports can take a minute.
+                  Your export stays on this device. Big exports can take a minute.
                 </p>
                 <div className="mt-3 flex items-center justify-between text-xs text-slate-200">
                   <span className="muted">
@@ -567,7 +597,7 @@ export default function RewindPage() {
                 {loading ? "Generating your Rewind..." : "Generate my Rewind"}
               </button>
               <p className="muted text-xs text-slate-200">
-                Your data stays private — we anonymize and don’t save raw chats.
+                Your export stays private — we anonymize and only save a redacted summary (no raw chats).
               </p>
             </div>
           </form>
@@ -581,6 +611,10 @@ export default function RewindPage() {
                   <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                     How deep you went
                   </div>
+                  <div className="mt-3 text-2xl font-semibold text-white">
+                    {rewind.wrapped.archetype.title}
+                  </div>
+                  <p className="muted mt-2 text-sm text-slate-200">{rewind.wrapped.archetype.line}</p>
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Chats</div>
@@ -595,21 +629,16 @@ export default function RewindPage() {
                       </div>
                     </div>
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Days</div>
+                      <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Days you showed up</div>
                       <div className="mt-2 text-2xl font-semibold text-white">
                         {rewind.activeDays.toLocaleString()}
                       </div>
                     </div>
                   </div>
 
-                  {identityBanger && (
-                    <p className="mt-4 text-sm text-slate-100">
-                      <b>{identityBanger.line1}</b>
-                      {identityBanger.line2 && (
-                        <span className="muted mt-2 block text-xs text-slate-200">{identityBanger.line2}</span>
-                      )}
-                    </p>
-                  )}
+                  <p className="mt-4 text-sm text-slate-100">
+                    <b>{rewind.wrapped.hook.brag}</b>
+                  </p>
 
                   {rewind.topTopics[0] && (
                     <p className="mt-3 text-sm text-slate-100">
@@ -623,6 +652,8 @@ export default function RewindPage() {
                       </span>
                     </p>
                   )}
+
+                  <p className="mt-3 text-sm text-slate-100">{rewind.wrapped.hook.roast}</p>
                 </div>
 
                 <div className="flex flex-col gap-3 sm:items-end">
@@ -671,6 +702,28 @@ export default function RewindPage() {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 text-xs text-slate-200 sm:items-end">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={includeExamples}
+                        onChange={(e) => setIncludeExamples(e.currentTarget.checked)}
+                        className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                      />
+                      Include concrete examples (private)
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={allowRedactedExcerpts}
+                        onChange={(e) => setAllowRedactedExcerpts(e.currentTarget.checked)}
+                        className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                      />
+                      Allow small redacted excerpts (private)
+                    </label>
+                    <p className="muted text-[11px] text-slate-200">Sharing stays safe. No raw prompts.</p>
                   </div>
                 </div>
               </div>
@@ -723,75 +776,104 @@ export default function RewindPage() {
               </div>
             </div>
 
-            <div className="glass card-border rounded-3xl p-6 sm:p-8">
-              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                What you actually used AI for
-              </div>
-              {rewind.topTopics[0] && (
-                <p className="muted mt-3 text-sm text-slate-100">
-                  {topicTagline(rewind.topTopics[0].key)}
-                </p>
-              )}
-              <ul className="mt-5 space-y-4 text-sm text-slate-100">
-                {rewind.topTopics.map((t) => {
-                  const pct =
-                    rewind.totalConversations > 0
-                      ? Math.round((t.count / rewind.totalConversations) * 100)
-                      : 0;
-                  return (
-                    <li key={t.key} className="space-y-2">
-                      <div className="flex items-center justify-between gap-3">
-                        <span>
-                          {t.emoji} <b>{t.label}</b>
-                        </span>
-                        <span className="muted text-xs">
-                          {t.count.toLocaleString()} chats • {pct}%
-                        </span>
+            {rewind.wrapped.projects.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Your top builds</div>
+                <p className="muted mt-3 text-sm text-slate-100">Your top “artists” this year.</p>
+
+                <ol className="mt-5 space-y-4 text-sm text-slate-100">
+                  {rewind.wrapped.projects.map((project, idx) => (
+                    <li key={`${project.projectLabel}-${idx}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-xs uppercase tracking-[0.2em] text-slate-200">#{idx + 1}</div>
+                          <div className="mt-2 text-base font-semibold text-white">{project.projectLabel}</div>
+                          <p className="mt-2 text-sm text-slate-100">{project.whatYouBuilt}</p>
+                        </div>
+                        <div className="flex flex-wrap gap-2 sm:justify-end">
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+                            {project.statusGuess}
+                          </span>
+                          <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
+                            {project.intensity}
+                          </span>
+                        </div>
                       </div>
-                      <div className="h-2 rounded-full bg-white/5">
-                        <div
-                          className="h-2 rounded-full bg-gradient-to-r from-emerald-300/70 to-sky-300/60"
-                          style={{ width: `${Math.max(3, pct)}%` }}
-                        />
+
+                      {includeExamples && (
+                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex flex-wrap gap-2">
+                            {project.stack.slice(0, 6).map((t) => (
+                              <span
+                                key={t}
+                                className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-xs text-emerald-50"
+                              >
+                                {t}
+                              </span>
+                            ))}
+                          </div>
+                          {project.monthsActive.length > 0 && (
+                            <div className="muted text-xs text-slate-200">
+                              {project.monthsActive.slice(0, 4).join(", ")}
+                              {project.monthsActive.length > 4 ? "…" : ""}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
+
+            {rewind.wrapped.bossFights.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                  Boss fights you couldn't stop replaying
+                </div>
+                <p className="muted mt-3 text-sm text-slate-100">We saw the same enemies show up. Again.</p>
+
+                <ul className="mt-5 space-y-4 text-sm text-slate-100">
+                  {rewind.wrapped.bossFights.map((boss) => (
+                    <li key={`${boss.title}-${boss.example}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-base font-semibold text-white">{boss.title}</div>
+                          <p className="muted mt-1 text-xs text-slate-200">Example: {boss.example}</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-semibold text-white">{boss.count.toLocaleString()}x</div>
+                          <p className="muted mt-1 text-xs text-slate-200">replayed</p>
+                        </div>
                       </div>
                     </li>
-                  );
-                })}
-              </ul>
-            </div>
-
-            <div className="glass card-border rounded-3xl p-6 sm:p-8">
-              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                Work rhythm
+                  ))}
+                </ul>
               </div>
-              <div className="mt-4 grid gap-3 text-sm text-slate-100">
-                <p>
-                  {rewind.activeDays >= 260
-                    ? `You showed up on ${rewind.activeDays.toLocaleString()} different days. That’s a routine.`
-                    : rewind.activeDays >= 120
-                      ? `You showed up on ${rewind.activeDays.toLocaleString()} different days. Consistent energy.`
-                      : `You showed up on ${rewind.activeDays.toLocaleString()} different days. You knew when to tap in.`}
-                </p>
+            )}
 
-                {rewind.peakHour != null && (
-                  <p>
-                    Most of your chats landed in <b>{timeOfDayLabel(rewind.peakHour)}</b>. {primeTimeRoast(rewind.peakHour)}
-                  </p>
-                )}
-
-                {rewind.busiestMonth && (
-                  <p>
-                    Your peak month was <b>{rewind.busiestMonth}</b>. We won’t ask why.
-                  </p>
-                )}
-
-                <p className="muted text-slate-200">
-                  {rewind.lateNightPercent >= 25
-                    ? "Translation: the late-night spirals were productive."
-                    : "Translation: you came here before it became chaos."}
-                </p>
+            {rewind.wrapped.weirdRabbitHole && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                  {rewind.wrapped.weirdRabbitHole.title}
+                </div>
+                <p className="mt-4 text-sm text-slate-100">{rewind.wrapped.weirdRabbitHole.detail}</p>
               </div>
-            </div>
+            )}
+
+            {allowRedactedExcerpts && momentLines.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Tiny redacted moments</div>
+                <p className="muted mt-3 text-sm text-slate-100">Private view only. No raw prompts.</p>
+                <ul className="mt-5 space-y-3 text-sm text-slate-100">
+                  {momentLines.map((m) => (
+                    <li key={m} className="leading-relaxed">
+                      {m}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
@@ -816,9 +898,7 @@ export default function RewindPage() {
             </div>
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
-              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                Receipts
-              </div>
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Receipts</div>
               <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="muted text-sm text-slate-100">We brought evidence.</p>
                 <label className="flex items-center gap-2 text-xs text-slate-200">
@@ -857,6 +937,154 @@ export default function RewindPage() {
 
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                What you actually used AI for
+              </div>
+              {rewind.topTopics[0] && (
+                <p className="muted mt-3 text-sm text-slate-100">
+                  {topicTagline(rewind.topTopics[0].key)}
+                </p>
+              )}
+              <ul className="mt-5 space-y-4 text-sm text-slate-100">
+                {rewind.topTopics.map((t) => {
+                  const pct =
+                    rewind.totalConversations > 0
+                      ? Math.round((t.count / rewind.totalConversations) * 100)
+                      : 0;
+                  return (
+                    <li key={t.key} className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span>
+                          {t.emoji} <b>{t.label}</b>
+                        </span>
+                        <span className="muted text-xs">
+                          {t.count.toLocaleString()} chats | {pct}%
+                        </span>
+                      </div>
+                      <div className="h-2 rounded-full bg-white/5">
+                        <div
+                          className="h-2 rounded-full bg-gradient-to-r from-emerald-300/70 to-sky-300/60"
+                          style={{ width: `${Math.max(3, pct)}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Character arc</div>
+              <div className="mt-4 grid gap-3 text-sm text-slate-100">
+                {rewind.promptLengthChangePercent != null && (
+                  <p>
+                    Your prompts got <b>{Math.abs(rewind.promptLengthChangePercent)}%</b>{" "}
+                    {rewind.promptLengthChangePercent > 0 ? "longer" : "shorter"} over the year.{" "}
+                    <span className="muted text-slate-200">
+                      {rewind.promptLengthChangePercent > 0
+                        ? "More context. More control."
+                        : "Early-year: essays. End-of-year: commands."}
+                    </span>
+                  </p>
+                )}
+                {rewind.longestPromptChars != null && (
+                  <p>
+                    Longest prompt: <b>{rewind.longestPromptChars.toLocaleString()}</b> characters.{" "}
+                    <span className="muted text-slate-200">You did not come to play.</span>
+                  </p>
+                )}
+                {rewind.avgPromptChars != null && (
+                  <p>
+                    Typical ask: around <b>{rewind.avgPromptChars}</b> characters.{" "}
+                    <span className="muted text-slate-200">You don't do vague.</span>
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
+                Highs, lows, and comebacks
+              </div>
+              <p className="muted mt-3 text-sm text-slate-100">The highlight reel. And the outtakes.</p>
+
+              <ul className="mt-5 space-y-3 text-sm text-slate-100">
+                {rewind.wrapped.wins[0] && (
+                  <li>
+                    High: <b>{rewind.wrapped.wins[0].title}</b> ({rewind.wrapped.wins[0].count.toLocaleString()})
+                  </li>
+                )}
+                {rewind.wrapped.timeline.mostActiveWeek && (
+                  <li>
+                    Most active week: <b>{rewind.wrapped.timeline.mostActiveWeek}</b>.
+                  </li>
+                )}
+                {rewind.wrapped.timeline.mostChaoticWeek && (
+                  <li>
+                    Most chaotic week: <b>{rewind.wrapped.timeline.mostChaoticWeek}</b>.
+                  </li>
+                )}
+                {rewind.wrapped.timeline.longestStreakDays != null && (
+                  <li>
+                    Longest streak: <b>{rewind.wrapped.timeline.longestStreakDays}</b> days.
+                  </li>
+                )}
+                {rewind.wrapped.timeline.villainMonth && (
+                  <li>
+                    Villain era: <b>{rewind.wrapped.timeline.villainMonth}</b>.{" "}
+                    {bySpice(spice, {
+                      mild: "Something was happening. You brought it here.",
+                      spicy: "It was a lot. We have receipts.",
+                      savage: "It was unhinged. We’re not asking questions.",
+                    })}
+                  </li>
+                )}
+                {rewind.wrapped.comebackMoment && (
+                  <li>
+                    <b>{rewind.wrapped.comebackMoment.title}:</b> {rewind.wrapped.comebackMoment.detail}
+                  </li>
+                )}
+              </ul>
+
+              {includeExamples && (
+                <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Flow months</div>
+                    <p className="mt-2 text-sm text-slate-100">
+                      {rewind.wrapped.timeline.flowMonths.length ? rewind.wrapped.timeline.flowMonths.join(", ") : "—"}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Friction months</div>
+                    <p className="mt-2 text-sm text-slate-100">
+                      {rewind.wrapped.timeline.frictionMonths.length
+                        ? rewind.wrapped.timeline.frictionMonths.join(", ")
+                        : "—"}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">2026 forecast</div>
+              <p className="muted mt-3 text-sm text-slate-100">
+                {bySpice(spice, {
+                  mild: "Playful prediction. For fun. For you.",
+                  spicy: "Playful prediction. Yes, it's probably accurate.",
+                  savage: "Playful prediction. We're probably right.",
+                })}
+              </p>
+              <ul className="mt-5 space-y-3 text-sm text-slate-100">
+                {rewind.wrapped.forecast.map((line) => (
+                  <li key={line} className="leading-relaxed">
+                    {line}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="hidden">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                 Character arc
               </div>
               <div className="mt-4 grid gap-3 text-sm text-slate-100">
@@ -866,7 +1094,7 @@ export default function RewindPage() {
                     {rewind.promptLengthChangePercent > 0 ? "longer" : "shorter"} over the year.{" "}
                     <span className="muted text-slate-200">
                       {rewind.promptLengthChangePercent > 0
-                        ? "You started bringing receipts."
+                        ? "More context. More control."
                         : "Early-year: essays. End-of-year: commands."}
                     </span>
                   </p>
@@ -894,6 +1122,7 @@ export default function RewindPage() {
                 {closingReflectionLines(rewind, spice).map((line) => (
                   <p key={line}>{line}</p>
                 ))}
+                <p className="mt-2 font-semibold text-white">{rewind.wrapped.closingLine}</p>
               </div>
             </div>
 
