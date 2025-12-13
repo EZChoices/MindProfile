@@ -289,6 +289,7 @@ const conversationsJsonBytesFromZip = (
 export async function analyzeRewindFileClient(
   file: File,
   onProgress?: (progress: RewindClientProgress) => void,
+  options?: { since?: Date; until?: Date },
 ): Promise<RewindSummary> {
   const totalBytes = file.size || 0;
   let bytesRead = 0;
@@ -299,7 +300,7 @@ export async function analyzeRewindFileClient(
     onProgress?.({ phase, bytesRead, totalBytes, conversationsProcessed });
   };
 
-  const analyzer = createRewindAnalyzer();
+  const analyzer = createRewindAnalyzer({ since: options?.since, until: options?.until });
 
   const addConversation = (item: unknown) => analyzer.addConversation(item);
 

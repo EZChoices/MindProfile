@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { logAnalysisError } from "@/lib/logAnalysisError";
 import type { RewindSummary } from "@/lib/rewind";
+import { sanitizeRewindForStorage } from "@/lib/rewindSanitize";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object";
@@ -15,6 +16,11 @@ const isNullableString = (value: unknown): value is string | null =>
 
 const isNullableNumber = (value: unknown): value is number | null =>
   value === null || isFiniteNumber(value);
+
+const isCoverage = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return typeof value.sinceMonth === "string" && typeof value.untilMonth === "string" && typeof value.timezone === "string";
+};
 
 const isPhraseInsight = (value: unknown) => {
   if (!isRecord(value)) return false;
@@ -66,6 +72,8 @@ const isConversationSummary = (value: unknown) => {
     isNullableString(value.topicKey) &&
     isNullableString(value.themeKey) &&
     isNullableString(value.month) &&
+    isNullableString(value.startDay) &&
+    isNullableString(value.endDay) &&
     typeof value.oneLineSummary === "string" &&
     isFiniteNumber(value.userMessages) &&
     isFiniteNumber(value.avgPromptChars) &&
@@ -81,7 +89,11 @@ const isConversationSummary = (value: unknown) => {
     isFiniteNumber(value.winSignals) &&
     isFiniteNumber(value.frictionSignals) &&
     isFiniteNumber(value.indecisionSignals) &&
-    typeof value.comeback === "boolean"
+    typeof value.comeback === "boolean" &&
+    typeof value.hasBroken === "boolean" &&
+    typeof value.hasWtf === "boolean" &&
+    typeof value.hasAgainStill === "boolean" &&
+    typeof value.hasQuickIntro === "boolean"
   );
 };
 
@@ -103,7 +115,53 @@ const isProjectSummary = (value: unknown) => {
 
 const isBossFight = (value: unknown) => {
   if (!isRecord(value)) return false;
-  return typeof value.title === "string" && isFiniteNumber(value.count) && typeof value.example === "string";
+  return (
+    typeof value.title === "string" &&
+    isFiniteNumber(value.chats) &&
+    isNullableString(value.peak) &&
+    isNullableString(value.during) &&
+    typeof value.example === "string" &&
+    typeof value.intensityLine === "string"
+  );
+};
+
+const isRabbitHole = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.title === "string" &&
+    typeof value.range === "string" &&
+    isFiniteNumber(value.chats) &&
+    isFiniteNumber(value.days) &&
+    typeof value.why === "string" &&
+    isNullableString(value.excerpt)
+  );
+};
+
+const isLifeHighlight = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.type === "string" &&
+    isNullableString(value.month) &&
+    typeof value.title === "string" &&
+    typeof value.line === "string" &&
+    isFiniteNumber(value.confidence) &&
+    isNullableString(value.excerpt)
+  );
+};
+
+const isBestMoment = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.title === "string" &&
+    isNullableString(value.month) &&
+    typeof value.line === "string" &&
+    isNullableString(value.excerpt)
+  );
+};
+
+const isGrowthUpgrade = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return typeof value.title === "string" && typeof value.line === "string" && isNullableString(value.delta);
 };
 
 const isWrapped = (value: unknown) => {
@@ -157,6 +215,16 @@ const isWrapped = (value: unknown) => {
       (isRecord(value.weirdRabbitHole) &&
         typeof value.weirdRabbitHole.title === "string" &&
         typeof value.weirdRabbitHole.detail === "string")) &&
+    Array.isArray(value.rabbitHoles) &&
+    value.rabbitHoles.every(isRabbitHole) &&
+    Array.isArray(value.lifeHighlights) &&
+    value.lifeHighlights.every(isLifeHighlight) &&
+    Array.isArray(value.bestMoments) &&
+    value.bestMoments.every(isBestMoment) &&
+    Array.isArray(value.growthUpgrades) &&
+    value.growthUpgrades.every(isGrowthUpgrade) &&
+    Array.isArray(value.youVsYou) &&
+    value.youVsYou.every((l: unknown) => typeof l === "string") &&
     Array.isArray(value.forecast) &&
     value.forecast.every((l: unknown) => typeof l === "string") &&
     typeof value.closingLine === "string"
@@ -167,6 +235,7 @@ const isRewindSummary = (value: unknown): value is RewindSummary => {
   if (!isRecord(value)) return false;
 
   return (
+    isCoverage(value.coverage) &&
     isFiniteNumber(value.totalConversations) &&
     isFiniteNumber(value.totalUserMessages) &&
     isFiniteNumber(value.activeDays) &&
@@ -202,6 +271,7 @@ export async function POST(request: Request) {
     }
 
     const year = typeof payload.year === "number" && Number.isFinite(payload.year) ? payload.year : new Date().getFullYear();
+    const sanitizedRewind = sanitizeRewindForStorage(rewind);
 
     let rewindId: string | null = null;
     try {
@@ -209,7 +279,7 @@ export async function POST(request: Request) {
         data: {
           clientId,
           year,
-          summaryJson: rewind as unknown as Prisma.InputJsonValue,
+          summaryJson: sanitizedRewind as unknown as Prisma.InputJsonValue,
         },
       });
       rewindId = dbRewind.id;

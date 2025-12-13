@@ -124,10 +124,12 @@ export function generateRewindBangers(
   const topProject = wrapped.projects[0] ?? null;
   const projectCount = wrapped.projects.length;
   const topBoss = wrapped.bossFights[0] ?? null;
+  const topRabbitHole = wrapped.rabbitHoles[0] ?? null;
   const weirdRabbit = wrapped.weirdRabbitHole ?? null;
   const villainMonth = wrapped.timeline.villainMonth;
   const mostChaoticWeek = wrapped.timeline.mostChaoticWeek;
   const longestStreakDays = wrapped.timeline.longestStreakDays;
+  const topUpgrade = wrapped.growthUpgrades[0] ?? null;
   const promptsPerChat =
     summary.totalConversations > 0 ? Math.round(summary.totalUserMessages / summary.totalConversations) : 0;
   const hasChaos =
@@ -197,23 +199,37 @@ export function generateRewindBangers(
   }
 
   // Boss fight callout.
-  if (topBoss && topBoss.count > 0) {
+  if (topBoss && topBoss.chats > 0) {
     const line1 = bySpice(spice, {
       mild: `Biggest boss fight: ${topBoss.title}.`,
       spicy: `Biggest boss fight: ${topBoss.title}.`,
       savage: `Your biggest enemy: ${topBoss.example}.`,
     });
+    const peakHint = topBoss.peak ? ` · peaked ${topBoss.peak}` : "";
     add({
       id: "boss",
       category: "boss",
       line1,
-      line2: `(${formatCount(topBoss.count)}x)`,
-      score: 84 + scoreFromCount(topBoss.count) + scoreFromLength(line1),
+      line2: `(${formatCount(topBoss.chats)} chats${peakHint})`,
+      score: 84 + scoreFromCount(topBoss.chats) + scoreFromLength(line1),
     });
   }
 
-  // Weird rabbit hole.
-  if (weirdRabbit) {
+  // Rabbit hole.
+  if (topRabbitHole) {
+    const line1 = bySpice(spice, {
+      mild: `Rabbit hole: ${topRabbitHole.title}.`,
+      spicy: `Rabbit hole: ${topRabbitHole.title}.`,
+      savage: `Your weirdest rabbit hole: ${topRabbitHole.title}.`,
+    });
+    add({
+      id: "rabbit",
+      category: "weird",
+      line1,
+      line2: `${formatCount(topRabbitHole.chats)} chats in ${formatCount(topRabbitHole.days)} days (${topRabbitHole.range}).`,
+      score: 64 + scoreFromCount(topRabbitHole.chats) + scoreFromLength(line1),
+    });
+  } else if (weirdRabbit) {
     const line1 = bySpice(spice, {
       mild: weirdRabbit.title + ".",
       spicy: `${weirdRabbit.title}: ${weirdRabbit.detail}`,
@@ -224,6 +240,22 @@ export function generateRewindBangers(
       category: "weird",
       line1,
       score: 58 + scoreFromLength(line1),
+    });
+  }
+
+  // Growth upgrade.
+  if (topUpgrade) {
+    const line1 = bySpice(spice, {
+      mild: `${topUpgrade.title}.`,
+      spicy: `${topUpgrade.title}.`,
+      savage: `${topUpgrade.title}.`,
+    });
+    add({
+      id: "upgrade",
+      category: "arc",
+      line1,
+      line2: topUpgrade.delta ? `${topUpgrade.line} (${topUpgrade.delta})` : topUpgrade.line,
+      score: 66 + scoreFromLength(line1) + scoreFromLength(topUpgrade.line),
     });
   }
 
@@ -589,7 +621,9 @@ export function generateRewindBangers(
   if (spice === "mild") {
     const first = pick((b) => ["projects", "identity"].includes(b.category)) ?? pick(() => true);
     if (first) share.push(first);
-    const second = pick((b) => ["growth", "forecast", "timeline", "weird", "rhythm"].includes(b.category)) ?? pick(() => true);
+    const second =
+      pick((b) => ["growth", "forecast", "timeline", "weird", "rhythm", "arc"].includes(b.category)) ??
+      pick(() => true);
     if (second) share.push(second);
     const third = pick((b) => ["topics", "style"].includes(b.category)) ?? pick(() => true);
     if (third) share.push(third);
@@ -600,7 +634,7 @@ export function generateRewindBangers(
     if (first) share.push(first);
     const second = pick((b) => ["projects", "identity"].includes(b.category)) ?? pick(() => true);
     if (second) share.push(second);
-    const third = pick((b) => ["growth", "forecast", "timeline", "weird"].includes(b.category)) ?? pick(() => true);
+    const third = pick((b) => ["growth", "forecast", "timeline", "weird", "arc"].includes(b.category)) ?? pick(() => true);
     if (third) share.push(third);
   }
 

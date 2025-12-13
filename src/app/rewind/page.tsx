@@ -7,6 +7,7 @@ import type { RewindSummary } from "@/lib/rewind";
 import { analyzeRewindFileClient } from "@/lib/rewindFileClient";
 import type { RewindClientProgress } from "@/lib/rewindFileClient";
 import { generateRewindBangers, type RewindBanger, type SpiceLevel } from "@/lib/rewindBangers";
+import { sanitizeRewindForStorage } from "@/lib/rewindSanitize";
 
 const errorMessages: Record<string, string> = {
   no_file: "Please select your ChatGPT export file.",
@@ -22,6 +23,42 @@ const formatHour = (hour: number) => {
 };
 
 const formatHourRange = (hour: number) => `${formatHour(hour)}-${formatHour((hour + 1) % 24)}`;
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+const monthKeyFromDate = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+
+const defaultYearWindow = () => {
+  const now = new Date();
+  const until = new Date(now.getFullYear(), now.getMonth(), 1);
+  const since = new Date(until.getFullYear(), until.getMonth() - 12, 1);
+  return { sinceMonth: monthKeyFromDate(since), untilMonth: monthKeyFromDate(until) };
+};
+
+const monthKeyToDate = (key: string): Date | null => {
+  const match = /^(\d{4})-(\d{2})$/.exec(key);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  return new Date(year, month - 1, 1);
+};
+
+const monthKeyLabel = (key: string) => {
+  const d = monthKeyToDate(key);
+  if (!d) return key;
+  return new Intl.DateTimeFormat(undefined, { month: "short", year: "numeric" }).format(d);
+};
+
+const previousMonthKey = (key: string) => {
+  const d = monthKeyToDate(key);
+  if (!d) return key;
+  const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+  return monthKeyFromDate(prev);
+};
+
+const formatCoverage = (coverage: RewindSummary["coverage"]) =>
+  `${monthKeyLabel(coverage.sinceMonth)} → ${monthKeyLabel(coverage.untilMonth)} (${coverage.timezone})`;
 
 type ShareInsight = { headline: string; subhead?: string };
 
@@ -229,6 +266,8 @@ const downloadBlob = (blob: Blob, filename: string) => {
 
 export default function RewindPage() {
   const [file, setFile] = useState<File | null>(null);
+  const [sinceMonth, setSinceMonth] = useState<string>(() => defaultYearWindow().sinceMonth);
+  const [untilMonth, setUntilMonth] = useState<string>(() => defaultYearWindow().untilMonth);
   const [loading, setLoading] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [debugDetails, setDebugDetails] = useState<string | null>(null);
@@ -285,35 +324,6 @@ export default function RewindPage() {
         )
         .slice(0, 6)
     : [];
-
-  const momentLines = (() => {
-    if (!rewind || !allowRedactedExcerpts) return [];
-    const picked: string[] = [];
-    const seen = new Set<string>();
-
-    const add = (predicate: (c: RewindSummary["conversations"][number]) => boolean) => {
-      const found = rewind.conversations.find((c) => predicate(c) && c.oneLineSummary && !seen.has(c.oneLineSummary));
-      if (!found) return;
-      seen.add(found.oneLineSummary);
-      picked.push(found.oneLineSummary.length > 140 ? found.oneLineSummary.slice(0, 137) + "…" : found.oneLineSummary);
-    };
-
-    add((c) => c.comeback);
-    add((c) => c.mood === "flow");
-    add((c) => c.mood === "frustrated");
-
-    if (picked.length < 3) {
-      const sorted = [...rewind.conversations].sort((a, b) => b.userMessages - a.userMessages);
-      for (const c of sorted) {
-        if (!c.oneLineSummary || seen.has(c.oneLineSummary)) continue;
-        seen.add(c.oneLineSummary);
-        picked.push(c.oneLineSummary.length > 140 ? c.oneLineSummary.slice(0, 137) + "…" : c.oneLineSummary);
-        if (picked.length >= 3) break;
-      }
-    }
-
-    return picked.slice(0, 3);
-  })();
 
   const buildShareText = (insight: ShareInsight) =>
     insight.subhead ? `${insight.headline}\n${insight.subhead}` : insight.headline;
@@ -383,8 +393,6 @@ export default function RewindPage() {
     setAllowRedactedExcerpts(false);
   };
 
-  const shouldProcessLocally = (candidate: File) => candidate.size > 4 * 1024 * 1024;
-
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setApiError(null);
@@ -407,58 +415,26 @@ export default function RewindPage() {
     try {
       const clientId = getOrCreateClientId();
 
-      const processLocally = async () => {
-        const summary = await analyzeRewindFileClient(file, (p) => setClientProgress(p));
-        setRewind(summary);
-        try {
-          await fetch("/api/rewind/store", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ clientId, rewind: summary, year: new Date().getFullYear() }),
-          });
-        } catch (err) {
-          console.warn("Failed to persist rewind summary", err);
-        }
-      };
-
-      if (shouldProcessLocally(file)) {
-        await processLocally();
-        return;
-      }
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("clientId", clientId);
-
-      const res = await fetch("/api/rewind", {
-        method: "POST",
-        body: formData,
-        headers: debugEnabled ? { "x-rewind-debug": "1" } : undefined,
-      });
-      const contentType = res.headers.get("content-type") || "";
-
-      if (!contentType.toLowerCase().includes("application/json")) {
-        const text = await res.text();
-        setDebugDetails(`HTTP ${res.status} ${res.statusText}\n${text.slice(0, 800)}`);
-        if (res.status === 403 || res.status === 413) {
-          await processLocally();
-          return;
-        }
-        setApiError(errorMessages.analysis_failed);
+      const since = monthKeyToDate(sinceMonth);
+      const until = monthKeyToDate(untilMonth);
+      if (!since || !until || since.getTime() >= until.getTime()) {
+        setApiError("Pick a valid year window.");
         return;
       }
 
-      const data = (await res.json()) as { rewind?: RewindSummary; error?: string; message?: string };
+      const summary = await analyzeRewindFileClient(file, (p) => setClientProgress(p), { since, until });
+      setRewind(summary);
 
-      if (!res.ok || !data.rewind) {
-        setApiError(errorMessages[data.error || "analysis_failed"] || errorMessages.analysis_failed);
-        if (debugEnabled) {
-          const debug = data?.message || `HTTP ${res.status} ${data?.error || "unknown_error"}`;
-          setDebugDetails(debug);
-        }
-        return;
+      try {
+        const year = new Date(until.getTime() - 1).getFullYear();
+        await fetch("/api/rewind/store", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ clientId, rewind: sanitizeRewindForStorage(summary), year }),
+        });
+      } catch (err) {
+        console.warn("Failed to persist rewind summary", err);
       }
-
-      setRewind(data.rewind);
     } catch (err) {
       console.error("Rewind upload failed", err);
       const message = err instanceof Error ? err.message : String(err);
@@ -532,6 +508,34 @@ export default function RewindPage() {
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 file:mr-4 file:rounded-lg file:border-0 file:bg-emerald-300/20 file:px-3 file:py-2 file:text-xs file:font-semibold file:text-emerald-50 hover:file:bg-emerald-300/30"
               />
             </label>
+
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Year window</div>
+              <p className="muted mt-2 text-xs text-slate-200">Default: last full 12 months.</p>
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <label className="grid gap-2 text-xs text-slate-200">
+                  <span className="font-semibold uppercase tracking-[0.2em] text-slate-200">From</span>
+                  <input
+                    type="month"
+                    value={sinceMonth}
+                    onChange={(e) => setSinceMonth(e.currentTarget.value)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100"
+                  />
+                </label>
+                <label className="grid gap-2 text-xs text-slate-200">
+                  <span className="font-semibold uppercase tracking-[0.2em] text-slate-200">To</span>
+                  <input
+                    type="month"
+                    value={untilMonth}
+                    onChange={(e) => setUntilMonth(e.currentTarget.value)}
+                    className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100"
+                  />
+                </label>
+              </div>
+              <p className="muted mt-3 text-xs text-slate-200">
+                Coverage: {monthKeyLabel(sinceMonth)} → {monthKeyLabel(previousMonthKey(untilMonth))} (local time)
+              </p>
+            </div>
 
             {apiError && (
               <div className="space-y-2">
@@ -611,16 +615,17 @@ export default function RewindPage() {
                   <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                     How deep you went
                   </div>
-                  <div className="mt-3 text-2xl font-semibold text-white">
-                    {rewind.wrapped.archetype.title}
-                  </div>
-                  <p className="muted mt-2 text-sm text-slate-200">{rewind.wrapped.archetype.line}</p>
-                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Chats</div>
-                      <div className="mt-2 text-2xl font-semibold text-white">
-                        {rewind.totalConversations.toLocaleString()}
-                      </div>
+                   <div className="mt-3 text-2xl font-semibold text-white">
+                     {rewind.wrapped.archetype.title}
+                   </div>
+                   <p className="muted mt-2 text-sm text-slate-200">{rewind.wrapped.archetype.line}</p>
+                   <p className="muted mt-2 text-xs text-slate-200">Coverage: {formatCoverage(rewind.coverage)}</p>
+                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                       <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Chats</div>
+                       <div className="mt-2 text-2xl font-semibold text-white">
+                         {rewind.totalConversations.toLocaleString()}
+                       </div>
                     </div>
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Prompts</div>
@@ -776,10 +781,70 @@ export default function RewindPage() {
               </div>
             </div>
 
+            {includeExamples && rewind.wrapped.lifeHighlights.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Life highlights</div>
+                <p className="muted mt-3 text-sm text-slate-100">Private view. No raw prompts.</p>
+
+                <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                  {rewind.wrapped.lifeHighlights.slice(0, 8).map((h, idx) => (
+                    <div
+                      key={`${h.title}-${idx}`}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-base font-semibold text-white">{h.title}</div>
+                          {h.month && <p className="muted mt-1 text-xs text-slate-200">{h.month}</p>}
+                        </div>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-100">{h.line}</p>
+                      {allowRedactedExcerpts && h.excerpt && (
+                        <p className="muted mt-2 text-xs text-slate-200">“{h.excerpt}”</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {rewind.wrapped.rabbitHoles.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Rabbit holes</div>
+                <p className="muted mt-3 text-sm text-slate-100">Short obsessions. High intensity.</p>
+
+                <ul className="mt-5 space-y-4 text-sm text-slate-100">
+                  {rewind.wrapped.rabbitHoles.map((hole) => (
+                    <li
+                      key={`${hole.title}-${hole.range}`}
+                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-base font-semibold text-white">{hole.title}</div>
+                          <p className="muted mt-1 text-xs text-slate-200">{hole.range}</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-semibold text-white">{hole.chats.toLocaleString()}</div>
+                          <p className="muted mt-1 text-xs text-slate-200">
+                            chats in {hole.days.toLocaleString()} days
+                          </p>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-100">{hole.why}</p>
+                      {allowRedactedExcerpts && hole.excerpt && (
+                        <p className="muted mt-2 text-xs text-slate-200">“{hole.excerpt}”</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             {rewind.wrapped.projects.length > 0 && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Your top builds</div>
-                <p className="muted mt-3 text-sm text-slate-100">Your top “artists” this year.</p>
+                <p className="muted mt-3 text-sm text-slate-100">Your top "artists" this year.</p>
 
                 <ol className="mt-5 space-y-4 text-sm text-slate-100">
                   {rewind.wrapped.projects.map((project, idx) => (
@@ -839,11 +904,15 @@ export default function RewindPage() {
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <div className="text-base font-semibold text-white">{boss.title}</div>
-                          <p className="muted mt-1 text-xs text-slate-200">Example: {boss.example}</p>
+                          <p className="muted mt-1 text-xs text-slate-200">{boss.intensityLine}</p>
+                          {boss.during && (
+                            <p className="muted mt-2 text-xs text-slate-200">During: {boss.during}.</p>
+                          )}
+                          <p className="muted mt-2 text-xs text-slate-200">Example: {boss.example}</p>
                         </div>
                         <div className="text-right">
-                          <div className="text-lg font-semibold text-white">{boss.count.toLocaleString()}x</div>
-                          <p className="muted mt-1 text-xs text-slate-200">replayed</p>
+                          <div className="text-lg font-semibold text-white">{boss.chats.toLocaleString()}</div>
+                          <p className="muted mt-1 text-xs text-slate-200">chats</p>
                         </div>
                       </div>
                     </li>
@@ -852,7 +921,7 @@ export default function RewindPage() {
               </div>
             )}
 
-            {rewind.wrapped.weirdRabbitHole && (
+            {rewind.wrapped.rabbitHoles.length === 0 && rewind.wrapped.weirdRabbitHole && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                   {rewind.wrapped.weirdRabbitHole.title}
@@ -861,14 +930,24 @@ export default function RewindPage() {
               </div>
             )}
 
-            {allowRedactedExcerpts && momentLines.length > 0 && (
+            {rewind.wrapped.bestMoments.length > 0 && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
-                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Tiny redacted moments</div>
-                <p className="muted mt-3 text-sm text-slate-100">Private view only. No raw prompts.</p>
-                <ul className="mt-5 space-y-3 text-sm text-slate-100">
-                  {momentLines.map((m) => (
-                    <li key={m} className="leading-relaxed">
-                      {m}
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Best moments</div>
+                <p className="muted mt-3 text-sm text-slate-100">The highlight reel. No raw prompts.</p>
+
+                <ul className="mt-5 space-y-4 text-sm text-slate-100">
+                  {rewind.wrapped.bestMoments.map((m) => (
+                    <li key={`${m.title}-${m.month ?? "x"}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-base font-semibold text-white">{m.title}</div>
+                          {m.month && <p className="muted mt-1 text-xs text-slate-200">{m.month}</p>}
+                        </div>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-100">{m.line}</p>
+                      {allowRedactedExcerpts && m.excerpt && (
+                        <p className="muted mt-2 text-xs text-slate-200">{m.excerpt}</p>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -972,9 +1051,33 @@ export default function RewindPage() {
               </ul>
             </div>
 
+            {rewind.wrapped.youVsYou.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">You vs you</div>
+                <p className="muted mt-3 text-sm text-slate-100">No global stats. Just your own baseline.</p>
+                <ul className="mt-5 space-y-3 text-sm text-slate-100">
+                  {rewind.wrapped.youVsYou.map((line) => (
+                    <li key={line} className="leading-relaxed">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="glass card-border rounded-3xl p-6 sm:p-8">
               <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Character arc</div>
               <div className="mt-4 grid gap-3 text-sm text-slate-100">
+                {rewind.wrapped.growthUpgrades.length > 0 && (
+                  <ul className="space-y-2">
+                    {rewind.wrapped.growthUpgrades.map((u) => (
+                      <li key={u.title} className="leading-relaxed">
+                        <b>{u.title}.</b> {u.line}{" "}
+                        {u.delta && <span className="muted text-xs text-slate-200">({u.delta})</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {rewind.promptLengthChangePercent != null && (
                   <p>
                     Your prompts got <b>{Math.abs(rewind.promptLengthChangePercent)}%</b>{" "}

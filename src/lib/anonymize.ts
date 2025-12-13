@@ -63,7 +63,8 @@ export interface AnonymizeResult {
   };
 }
 
-export const anonymizeText = (text: string): AnonymizeResult => {
+export const anonymizeText = (text: string, options?: { redactNames?: boolean }): AnonymizeResult => {
+  const redactNames = options?.redactNames !== false;
   let emails = 0;
   let phones = 0;
   let urls = 0;
@@ -121,11 +122,13 @@ export const anonymizeText = (text: string): AnonymizeResult => {
     return "[card]";
   });
 
-  sanitized = sanitized.replace(NAME_REGEX, (match) => {
-    if (NAME_STOPWORDS.has(match)) return match;
-    names += 1;
-    return "[name]";
-  });
+  if (redactNames) {
+    sanitized = sanitized.replace(NAME_REGEX, (match) => {
+      if (NAME_STOPWORDS.has(match)) return match;
+      names += 1;
+      return "[name]";
+    });
+  }
 
   return {
     sanitized: compressWhitespace(sanitized),

@@ -38,6 +38,8 @@ export interface RewindConversationSummary {
   topicKey: string | null;
   themeKey: string | null;
   month: string | null;
+  startDay: string | null;
+  endDay: string | null;
   oneLineSummary: string;
   userMessages: number;
   avgPromptChars: number;
@@ -52,6 +54,10 @@ export interface RewindConversationSummary {
   frictionSignals: number;
   indecisionSignals: number;
   comeback: boolean;
+  hasBroken: boolean;
+  hasWtf: boolean;
+  hasAgainStill: boolean;
+  hasQuickIntro: boolean;
 }
 
 export interface RewindProjectSummary {
@@ -67,8 +73,11 @@ export interface RewindProjectSummary {
 
 export interface RewindBossFight {
   title: string;
-  count: number;
+  chats: number;
+  peak: string | null;
+  during: string | null;
   example: string;
+  intensityLine: string;
 }
 
 export interface RewindWrappedSummary {
@@ -96,6 +105,34 @@ export interface RewindWrappedSummary {
     mostChaoticWeek: string | null;
   };
   weirdRabbitHole: { title: string; detail: string } | null;
+  rabbitHoles: Array<{
+    title: string;
+    range: string;
+    chats: number;
+    days: number;
+    why: string;
+    excerpt: string | null;
+  }>;
+  lifeHighlights: Array<{
+    type: string;
+    month: string | null;
+    title: string;
+    line: string;
+    confidence: number;
+    excerpt: string | null;
+  }>;
+  bestMoments: Array<{
+    title: string;
+    month: string | null;
+    line: string;
+    excerpt: string | null;
+  }>;
+  growthUpgrades: Array<{
+    title: string;
+    line: string;
+    delta: string | null;
+  }>;
+  youVsYou: string[];
   forecast: string[];
   closingLine: string;
 }
@@ -127,6 +164,11 @@ export interface RewindBehavior {
 }
 
 export interface RewindSummary {
+  coverage: {
+    sinceMonth: string;
+    untilMonth: string;
+    timezone: string;
+  };
   totalConversations: number;
   totalUserMessages: number;
   activeDays: number;
@@ -390,6 +432,88 @@ const INDECISION_PATTERNS: RegExp[] = [
   /\bmaybe\b/gi,
 ];
 
+const HEDGE_PATTERNS: RegExp[] = [
+  /\bmaybe\b/i,
+  /\bnot sure\b/i,
+  /\bunsure\b/i,
+  /\bprobably\b/i,
+  /\bperhaps\b/i,
+  /\bi think\b/i,
+  /\bkind of\b/i,
+  /\bkinda\b/i,
+  /\bsort of\b/i,
+];
+
+const CONSTRAINT_PATTERNS: RegExp[] = [
+  /\bmust\b/i,
+  /\bexactly\b/i,
+  /\bonly\b/i,
+  /\bstrictly\b/i,
+  /\bno more than\b/i,
+  /\bformat\b/i,
+  /\bjson\b/i,
+  /\bschema\b/i,
+  /\boutput\b/i,
+  /\breturn\b/i,
+  /\bdo not\b/i,
+  /\bdon't\b/i,
+  /\bavoid\b/i,
+];
+
+const TRAVEL_CUE_PATTERN =
+  /\b(flight|flights|hotel|airbnb|itinerary|visa|passport|trip|travel|vacation|holiday|things to do)\b/i;
+
+const TRAVEL_DESTINATION_PATTERNS: RegExp[] = [
+  /\b(?:trip|travel|vacation|holiday|flight|flights)\s+(?:to|in)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
+  /\b(?:hotel|airbnb|stay|staying)\s+(?:in|at)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
+  /\bthings to do in\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
+];
+
+const extractTravelDestination = (text: string): string | null => {
+  for (const pattern of TRAVEL_DESTINATION_PATTERNS) {
+    pattern.lastIndex = 0;
+    const match = pattern.exec(text);
+    const captured = match?.[1];
+    if (!captured) continue;
+    const cleaned = captured.replace(/[^A-Za-z\s'-]/g, "").replace(/\s{2,}/g, " ").trim();
+    if (!cleaned) continue;
+    if (cleaned.length > 40) continue;
+    return cleaned;
+  }
+  return null;
+};
+
+const LIFE_HIGHLIGHT_TOKENS: Array<{ type: string; token: string }> = [
+  { type: "food", token: "baking" },
+  { type: "food", token: "recipe" },
+  { type: "food", token: "cooking" },
+  { type: "fitness", token: "gym" },
+  { type: "fitness", token: "workout" },
+  { type: "fitness", token: "running" },
+  { type: "fitness", token: "yoga" },
+  { type: "hobby", token: "photography" },
+  { type: "hobby", token: "guitar" },
+  { type: "hobby", token: "piano" },
+  { type: "hobby", token: "chess" },
+  { type: "life", token: "moving" },
+  { type: "life", token: "relocation" },
+  { type: "life", token: "apartment" },
+  { type: "life", token: "visa" },
+  { type: "career", token: "resume" },
+  { type: "career", token: "interview" },
+  { type: "career", token: "offer" },
+  { type: "learning", token: "spanish" },
+  { type: "learning", token: "french" },
+  { type: "learning", token: "japanese" },
+  { type: "learning", token: "korean" },
+  { type: "learning", token: "duolingo" },
+  { type: "fun", token: "dolphins" },
+];
+
+const LIFE_HIGHLIGHT_TOKEN_INDEX = new Map<string, { type: string }>(
+  LIFE_HIGHLIGHT_TOKENS.map((t) => [t.token, { type: t.type }]),
+);
+
 const AGAIN_PATTERN = /\bagain\b/gi;
 const STILL_PATTERN = /\bstill\b/gi;
 const QUESTION_BURST_PATTERN = /\?{3,}/g;
@@ -594,12 +718,34 @@ export interface RewindAnalyzer {
   summary: () => RewindSummary;
 }
 
-export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }): RewindAnalyzer {
+export function createRewindAnalyzer(options?: {
+  now?: Date;
+  daysBack?: number;
+  since?: Date;
+  until?: Date;
+}): RewindAnalyzer {
   const now = options?.now ?? new Date();
-  const daysBack = options?.daysBack ?? 365;
-  const nowMs = now.getTime();
-  const sinceMs = nowMs - daysBack * 24 * 60 * 60 * 1000;
-  const midMs = sinceMs + Math.floor((nowMs - sinceMs) / 2);
+  const until = options?.until ?? now;
+  const untilMs = until.getTime();
+
+  const sinceMs =
+    options?.since instanceof Date
+      ? options.since.getTime()
+      : untilMs - (options?.daysBack ?? 365) * 24 * 60 * 60 * 1000;
+
+  const midMs = sinceMs + Math.floor((untilMs - sinceMs) / 2);
+
+  const formatMonthKeyLocal = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+  const formatDayKeyLocal = (date: Date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
+  const coverage = {
+    sinceMonth: formatMonthKeyLocal(new Date(sinceMs)),
+    untilMonth: formatMonthKeyLocal(new Date(Math.max(sinceMs, untilMs - 1))),
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "local",
+  };
 
   let totalConversations = 0;
   let totalUserMessages = 0;
@@ -638,6 +784,23 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
   let latePromptChars = 0;
   let latePromptCount = 0;
 
+  let earlyHedgeMessages = 0;
+  let lateHedgeMessages = 0;
+  let earlyConstraintMessages = 0;
+  let lateConstraintMessages = 0;
+  let earlyMessageCount = 0;
+  let lateMessageCount = 0;
+
+  let earlyTurnsToWinSum = 0;
+  let earlyTurnsToWinCount = 0;
+  let lateTurnsToWinSum = 0;
+  let lateTurnsToWinCount = 0;
+
+  const lifeHighlightAccumulators = new Map<
+    string,
+    { type: string; label: string; chats: number; months: Map<string, number> }
+  >();
+
   const addConversation = (conversation: unknown) => {
     const convRecord = asRecord(conversation);
     if (!convRecord) return;
@@ -645,7 +808,7 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
     const titleRaw = convRecord.title;
     const title = typeof titleRaw === "string" ? titleRaw : "";
     const titleLower = title.toLowerCase();
-    const titleSafeLower = title ? anonymizeText(title).sanitized.toLowerCase() : "";
+    const titleSafeLower = title ? anonymizeText(title, { redactNames: false }).sanitized.toLowerCase() : "";
 
     const topicScores = new Map<string, number>();
     for (const bucket of TOPIC_BUCKETS) {
@@ -668,6 +831,12 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
     let conversationWinSignals = 0;
     let conversationFrictionMessages = 0;
     let conversationIndecisionSignals = 0;
+    let conversationHasBroken = false;
+    let conversationHasWtf = false;
+    let conversationHasAgainStill = false;
+    let firstWinTurn: number | null = null;
+    let travelDestination: string | null = null;
+    const conversationHighlightKeys = new Set<string>();
 
     const intentScores: Record<RewindIntent, number> = {
       build: 0,
@@ -733,13 +902,18 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
         parseTimestamp(convRecord.create_time) ??
         null;
 
-      if (createdAt && createdAt.getTime() < sinceMs) continue;
+      if (createdAt) {
+        const ms = createdAt.getTime();
+        if (ms < sinceMs || ms >= untilMs) continue;
+      }
 
       const rawText = normalizeMessageContent(msgRecord);
       if (!rawText) continue;
 
-      const { sanitized } = anonymizeText(rawText);
+      const scrubbed = anonymizeText(rawText, { redactNames: false }).sanitized;
+      const { sanitized } = anonymizeText(scrubbed);
       const trimmed = sanitized.trim();
+      const trimmedFlavor = scrubbed.trim();
       if (!trimmed.length) continue;
 
       conversationHasIncluded = true;
@@ -759,21 +933,22 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       }
 
       const lowered = trimmed.toLowerCase();
+      const loweredFlavor = trimmedFlavor.toLowerCase();
       let messageHasWtf = false;
       let messageHasBroken = false;
 
       for (const key of Object.keys(INTENT_KEYWORDS) as RewindIntent[]) {
-        intentScores[key] += scoreByKeywordPresence(lowered, INTENT_KEYWORDS[key]);
+        intentScores[key] += scoreByKeywordPresence(loweredFlavor, INTENT_KEYWORDS[key]);
       }
       for (const key of Object.keys(DELIVERABLE_KEYWORDS) as RewindDeliverable[]) {
-        deliverableScores[key] += scoreByKeywordPresence(lowered, DELIVERABLE_KEYWORDS[key]);
+        deliverableScores[key] += scoreByKeywordPresence(loweredFlavor, DELIVERABLE_KEYWORDS[key]);
       }
       for (const term of STACK_TERMS) {
-        const hits = countMatches(lowered, term.pattern);
+        const hits = countMatches(loweredFlavor, term.pattern);
         if (hits > 0) stackCounts.set(term.label, (stackCounts.get(term.label) ?? 0) + hits);
       }
       for (const theme of PROJECT_THEMES) {
-        const score = scoreByKeywordPresence(lowered, theme.keywords);
+        const score = scoreByKeywordPresence(loweredFlavor, theme.keywords);
         if (score > 0) themeScores.set(theme.key, (themeScores.get(theme.key) ?? 0) + score);
       }
 
@@ -785,6 +960,9 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
         conversationWinSignals += messageWinHits;
         winSignalTotal += messageWinHits;
       }
+      if (messageWinHits > 0 && firstWinTurn === null) {
+        firstWinTurn = conversationUserMessageCount;
+      }
 
       let messageIndecisionHits = 0;
       for (const pat of INDECISION_PATTERNS) {
@@ -794,11 +972,18 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
         conversationIndecisionSignals += messageIndecisionHits;
       }
 
+      const hasHedge = HEDGE_PATTERNS.some((p) => p.test(lowered));
+      const hasConstraint = CONSTRAINT_PATTERNS.some((p) => p.test(lowered));
+
+      if (!travelDestination && TRAVEL_CUE_PATTERN.test(loweredFlavor)) {
+        travelDestination = extractTravelDestination(trimmedFlavor);
+      }
+
       // Topics
       for (const bucket of TOPIC_BUCKETS) {
         let scoreDelta = 0;
         for (const kw of bucket.keywords) {
-          if (lowered.includes(kw)) scoreDelta += 1;
+          if (loweredFlavor.includes(kw)) scoreDelta += 1;
         }
         if (scoreDelta > 0) {
           topicScores.set(bucket.key, (topicScores.get(bucket.key) ?? 0) + scoreDelta);
@@ -818,6 +1003,8 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
           if (habit.phrase === "why is this broken" || habit.phrase === "doesn't work") messageHasBroken = true;
         }
       }
+      if (messageHasWtf) conversationHasWtf = true;
+      if (messageHasBroken) conversationHasBroken = true;
 
       const insultHits = recordTokenMatches(lowered, SPICY_WORD_PATTERN, nicknameCounts);
       const swearHits = countMatches(lowered, SWEAR_PATTERN);
@@ -838,6 +1025,7 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
 
       const messageStillHits = countMatches(lowered, STILL_PATTERN);
       if (messageStillHits > 0) stillCount += messageStillHits;
+      if (messageAgainHits > 0 || messageStillHits > 0) conversationHasAgainStill = true;
 
       const hasQuestionBurst = QUESTION_BURST_PATTERN.test(trimmed);
       QUESTION_BURST_PATTERN.lastIndex = 0;
@@ -863,6 +1051,12 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
 
       // Word frequencies
       const tokens = tokenize(lowered);
+      const flavorTokens = tokenize(loweredFlavor);
+      for (const token of flavorTokens) {
+        const entry = LIFE_HIGHLIGHT_TOKEN_INDEX.get(token);
+        if (!entry) continue;
+        conversationHighlightKeys.add(`${entry.type}:${token}`);
+      }
       for (const token of tokens) {
         if (ANON_TOKENS.has(token)) continue;
         if (token.length < 3) continue;
@@ -874,26 +1068,33 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       // Time stats
       if (createdAt) {
         timestampCount += 1;
-        const dayKey = createdAt.toISOString().slice(0, 10);
+        const dayKey = formatDayKeyLocal(createdAt);
         activeDaysSet.add(dayKey);
         dayMessageCount.set(dayKey, (dayMessageCount.get(dayKey) ?? 0) + 1);
         if (isRage) {
           dayChaosCount.set(dayKey, (dayChaosCount.get(dayKey) ?? 0) + 1);
         }
 
-        const monthKey = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(2, "0")}`;
+        const monthKey = formatMonthKeyLocal(createdAt);
         monthCount.set(monthKey, (monthCount.get(monthKey) ?? 0) + 1);
 
         const hour = createdAt.getHours();
         hourCount[hour] += 1;
         if (hour >= 23 || hour <= 4) lateNightCount += 1;
 
-        if (createdAt.getTime() <= midMs) {
+        const ms = createdAt.getTime();
+        if (ms <= midMs) {
           earlyPromptChars += len;
           earlyPromptCount += 1;
+          earlyMessageCount += 1;
+          if (hasHedge) earlyHedgeMessages += 1;
+          if (hasConstraint) earlyConstraintMessages += 1;
         } else {
           latePromptChars += len;
           latePromptCount += 1;
+          lateMessageCount += 1;
+          if (hasHedge) lateHedgeMessages += 1;
+          if (hasConstraint) lateConstraintMessages += 1;
         }
       }
     }
@@ -977,8 +1178,45 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
 
     const monthKey =
       conversationFirstMs != null
-        ? `${new Date(conversationFirstMs).getFullYear()}-${String(new Date(conversationFirstMs).getMonth() + 1).padStart(2, "0")}`
+        ? formatMonthKeyLocal(new Date(conversationFirstMs))
         : null;
+    const startDay = conversationFirstMs != null ? formatDayKeyLocal(new Date(conversationFirstMs)) : null;
+    const endDay = conversationLastMs != null ? formatDayKeyLocal(new Date(conversationLastMs)) : startDay;
+
+    if (firstWinTurn != null && conversationFirstMs != null) {
+      if (conversationFirstMs <= midMs) {
+        earlyTurnsToWinSum += firstWinTurn;
+        earlyTurnsToWinCount += 1;
+      } else {
+        lateTurnsToWinSum += firstWinTurn;
+        lateTurnsToWinCount += 1;
+      }
+    }
+
+    const recordLifeHighlight = (type: string, label: string) => {
+      const key = `${type}:${label.toLowerCase()}`;
+      const current =
+        lifeHighlightAccumulators.get(key) ?? {
+          type,
+          label,
+          chats: 0,
+          months: new Map<string, number>(),
+        };
+      current.chats += 1;
+      if (monthKey) current.months.set(monthKey, (current.months.get(monthKey) ?? 0) + 1);
+      lifeHighlightAccumulators.set(key, current);
+    };
+
+    if (travelDestination) recordLifeHighlight("travel", travelDestination);
+    for (const highlightKey of conversationHighlightKeys) {
+      const idx = highlightKey.indexOf(":");
+      if (idx <= 0) continue;
+      const type = highlightKey.slice(0, idx);
+      const token = highlightKey.slice(idx + 1);
+      if (!token) continue;
+      recordLifeHighlight(type, token);
+    }
+
     const durationMins =
       conversationFirstMs != null && conversationLastMs != null && conversationLastMs >= conversationFirstMs
         ? Math.round((conversationLastMs - conversationFirstMs) / 60000)
@@ -1059,6 +1297,8 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       topicKey,
       themeKey,
       month: monthKey,
+      startDay,
+      endDay,
       oneLineSummary,
       userMessages: conversationUserMessageCount,
       avgPromptChars: avgPrompt,
@@ -1073,6 +1313,10 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       frictionSignals: conversationFrictionMessages,
       indecisionSignals: conversationIndecisionSignals,
       comeback,
+      hasBroken: conversationHasBroken,
+      hasWtf: conversationHasWtf,
+      hasAgainStill: conversationHasAgainStill,
+      hasQuickIntro: conversationQuickIntro > 0,
     });
 
     if (bestTopic) {
@@ -1188,21 +1432,43 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       return `${monthName.slice(0, 3)} '${shortYear}`;
     };
 
+    const dayKeyUtcMs = (dayKey: string): number | null => {
+      const parts = dayKey.split("-");
+      if (parts.length !== 3) return null;
+      const year = Number(parts[0]);
+      const month = Number(parts[1]);
+      const day = Number(parts[2]);
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+      return Date.UTC(year, month - 1, day);
+    };
+
+    const parseDayKeyLocal = (dayKey: string): Date | null => {
+      const parts = dayKey.split("-");
+      if (parts.length !== 3) return null;
+      const year = Number(parts[0]);
+      const month = Number(parts[1]);
+      const day = Number(parts[2]);
+      if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+      const date = new Date(year, month - 1, day);
+      return Number.isNaN(date.getTime()) ? null : date;
+    };
+
     const weekStartKey = (dayKey: string) => {
-      const date = new Date(`${dayKey}T00:00:00Z`);
-      if (Number.isNaN(date.getTime())) return dayKey;
-      const day = date.getUTCDay(); // 0=Sun..6=Sat
+      const date = parseDayKeyLocal(dayKey);
+      if (!date) return dayKey;
+      const day = date.getDay(); // 0=Sun..6=Sat
       const diffToMonday = (day + 6) % 7; // Mon => 0, Sun => 6
-      date.setUTCDate(date.getUTCDate() - diffToMonday);
-      return date.toISOString().slice(0, 10);
+      const start = new Date(date.getTime());
+      start.setDate(start.getDate() - diffToMonday);
+      return formatDayKeyLocal(start);
     };
 
     const weekLabel = (weekKey: string) => {
-      const date = new Date(`${weekKey}T00:00:00Z`);
-      if (Number.isNaN(date.getTime())) return weekKey;
-      const monthName = monthNames[date.getUTCMonth()] ?? "";
-      const day = date.getUTCDate();
-      const year = String(date.getUTCFullYear()).slice(-2);
+      const date = parseDayKeyLocal(weekKey);
+      if (!date) return weekKey;
+      const monthName = monthNames[date.getMonth()] ?? "";
+      const day = date.getDate();
+      const year = String(date.getFullYear()).slice(-2);
       return `Week of ${monthName.slice(0, 3)} ${day} '${year}`;
     };
 
@@ -1212,8 +1478,9 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       let best = 1;
       let current = 1;
       for (let i = 1; i < days.length; i++) {
-        const prev = new Date(days[i - 1]).getTime();
-        const cur = new Date(days[i]).getTime();
+        const prev = dayKeyUtcMs(days[i - 1]);
+        const cur = dayKeyUtcMs(days[i]);
+        if (prev == null || cur == null) continue;
         const diffDays = Math.round((cur - prev) / (24 * 60 * 60 * 1000));
         if (diffDays === 1) {
           current += 1;
@@ -1280,11 +1547,11 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
         string,
         {
           projectKey: string;
-          primaryStack: string;
           chats: number;
           prompts: number;
           months: Set<string>;
           stackCounts: Map<string, number>;
+          deliverableCounts: Map<RewindDeliverable, number>;
           wins: number;
           friction: number;
         }
@@ -1292,17 +1559,16 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
 
       for (const conv of candidates) {
         const projectKey = conv.themeKey ?? conv.topicKey ?? (conv.intent === "debug" ? "debug" : conv.intent);
-        const primaryStack = conv.stack[0] ?? "General";
-        const clusterKey = `${projectKey}|${primaryStack}`;
+        const clusterKey = projectKey;
 
         const current =
           clusters.get(clusterKey) ?? {
             projectKey,
-            primaryStack,
             chats: 0,
             prompts: 0,
             months: new Set<string>(),
             stackCounts: new Map<string, number>(),
+            deliverableCounts: new Map<RewindDeliverable, number>(),
             wins: 0,
             friction: 0,
           };
@@ -1315,120 +1581,156 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
         for (const tool of conv.stack) {
           current.stackCounts.set(tool, (current.stackCounts.get(tool) ?? 0) + 1);
         }
+        current.deliverableCounts.set(
+          conv.deliverable,
+          (current.deliverableCounts.get(conv.deliverable) ?? 0) + 1,
+        );
         clusters.set(clusterKey, current);
       }
 
       const themeTitle = (key: string) => {
         switch (key) {
           case "automation":
-            return "The Automation Sprint";
+            return "Automation Sprint";
           case "dashboard":
-            return "The Dashboard Era";
+            return "Dashboard Era";
           case "api":
-            return "The API Season";
+            return "API Season";
           case "data":
-            return "The Data Dungeon";
+            return "Data Wrangling";
           case "deploy":
-            return "The Deploy Pipeline";
+            return "Shipping Pipeline";
           case "debug":
-            return "The Debug Dungeon";
+            return "Bug Bash";
           case "writing":
-            return "The Rewrite Spiral";
+            return "Rewrite Spiral";
           case "career":
-            return "The Career Moves Era";
+            return "Career Moves";
           case "travel":
-            return "The Trip Planning Saga";
+            return "Trip Planning";
           case "planning":
-            return "The Productivity System";
+            return "Productivity System";
           case "plan":
-            return "The Productivity System";
+            return "Productivity System";
           case "learning":
-            return "The Learning Sprint";
+            return "Learning Sprint";
           case "learn":
-            return "The Learning Sprint";
+            return "Learning Sprint";
           case "creative":
-            return "The Creative Playground";
+            return "Creative Playground";
           case "write":
-            return "The Rewrite Spiral";
+            return "Rewrite Spiral";
           case "build":
-            return "The Build Cycle";
+            return "Build Cycle";
           case "coding":
-            return "The Build Cycle";
+            return "Build Cycle";
           default:
-            return "The Build Cycle";
+            return "Build Cycle";
         }
       };
 
-      const whatBuilt = (key: string) => {
+      const pickTopDeliverable = (counts: Map<RewindDeliverable, number>): RewindDeliverable => {
+        let best: RewindDeliverable = "other";
+        let bestCount = counts.get(best) ?? 0;
+        for (const [k, v] of counts.entries()) {
+          if (v > bestCount) {
+            bestCount = v;
+            best = k;
+          }
+        }
+        return best;
+      };
+
+      const artifactNoun = (key: string, deliverable: RewindDeliverable) => {
+        if (key === "dashboard") return "a dashboard";
+        if (key === "api") return "an API";
+        if (key === "automation") return "an automation";
+        if (key === "data") return "a data pipeline";
+        if (key === "deploy") return "a deploy pipeline";
+        if (key === "debug") return "a bug fix";
+        if (key === "travel") return "a trip plan";
+        if (key === "career") return "a career move";
+        if (key === "planning" || key === "plan") return "a system";
+        if (key === "learning" || key === "learn") return "a crash course";
+        if (key === "creative") return "something creative";
+        if (key === "writing" || key === "write") return deliverable === "email" ? "a message draft" : "a rewrite";
+        if (key === "coding" || key === "build") return "a tool";
+        if (deliverable === "code") return "a build";
+        if (deliverable === "plan") return "a plan";
+        if (deliverable === "email") return "a message";
+        if (deliverable === "story") return "a story";
+        if (deliverable === "analysis") return "an analysis";
+        if (deliverable === "decision") return "a decision";
+        return "something";
+      };
+
+      const whatBuilt = (key: string, deliverable: RewindDeliverable, stackTop: string | null) => {
+        const noun = artifactNoun(key, deliverable);
+        const stackHint = stackTop ? ` (${stackTop})` : "";
         switch (key) {
           case "automation":
-            return "You tried to automate the boring parts and keep things moving.";
+            return `${noun}${stackHint} to do the boring parts for you.`;
           case "dashboard":
-            return "You built dashboards so you could see what was going on.";
+            return `${noun}${stackHint} so you could see what was going on.`;
           case "api":
-            return "You wired endpoints and made systems talk.";
+            return `${noun}${stackHint} to make systems talk.`;
           case "data":
-            return "You fought data until it behaved.";
+            return `${noun}${stackHint} to wrestle messy inputs into shape.`;
           case "deploy":
-            return "You shipped, broke it, and shipped again.";
+            return `${noun}${stackHint} so shipping was less of a gamble.`;
           case "debug":
-            return "You wrestled bugs until they tapped out.";
+            return `${noun}${stackHint} after enough “why is this broken”.`;
           case "writing":
-            return "You rewrote until it sounded like you.";
-          case "career":
-            return "You workshopped your next move like it mattered.";
-          case "travel":
-            return "You planned it like you were allergic to surprises.";
-          case "planning":
-            return "You turned chaos into a plan. Repeatedly.";
-          case "plan":
-            return "You turned chaos into a plan. Repeatedly.";
-          case "learning":
-            return "You kept pushing until it clicked.";
-          case "learn":
-            return "You kept pushing until it clicked.";
-          case "creative":
-            return "You played with ideas until one sparked.";
           case "write":
-            return "You rewrote until it sounded like you.";
-          case "build":
-            return "You built small things and kept iterating.";
+            return `${noun}${stackHint} until it sounded like you.`;
+          case "career":
+            return `${noun}${stackHint} you actually cared about.`;
+          case "travel":
+            return `${noun}${stackHint} because surprises are overrated.`;
+          case "planning":
+          case "plan":
+            return `${noun}${stackHint} to turn chaos into steps.`;
+          case "learning":
+          case "learn":
+            return `${noun}${stackHint} until it clicked.`;
+          case "creative":
+            return `${noun}${stackHint} until one idea sparked.`;
           default:
-            return "You built small things and kept iterating.";
+            return `${noun}${stackHint} and kept iterating.`;
         }
       };
 
-      const projectSummaries: RewindProjectSummary[] = Array.from(clusters.values())
+      const projectSummariesRaw: RewindProjectSummary[] = Array.from(clusters.values())
         .sort((a, b) => b.prompts - a.prompts)
         .slice(0, 5)
         .map((cluster) => {
           const monthsActive = Array.from(cluster.months).sort().map(monthLabel);
           const stack = pickTopFromCounts(cluster.stackCounts, 7);
+          const stackTop =
+            stack.find((t) => !["Git", "GitHub", "Windows", "Linux", "macOS"].includes(t)) ?? null;
+          const topDeliverable = pickTopDeliverable(cluster.deliverableCounts);
           const intensity: RewindProjectSummary["intensity"] =
             cluster.chats >= 60 ? "obsessive" : cluster.chats >= 20 ? "steady" : "light";
 
           const lastMonthKey = Array.from(cluster.months).sort().slice(-1)[0] ?? null;
           const lastMonthDate = lastMonthKey ? new Date(`${lastMonthKey}-15T00:00:00Z`).getTime() : null;
           const daysSinceLast =
-            lastMonthDate != null ? Math.floor((nowMs - lastMonthDate) / (24 * 60 * 60 * 1000)) : null;
+            lastMonthDate != null ? Math.floor((untilMs - lastMonthDate) / (24 * 60 * 60 * 1000)) : null;
 
           const statusGuess: RewindProjectSummary["statusGuess"] =
             daysSinceLast != null && daysSinceLast <= 45
               ? "recurring"
-            : cluster.wins > 0 && cluster.wins >= cluster.friction
+              : cluster.wins > 0 && cluster.wins >= cluster.friction
                 ? "shipped"
-                : cluster.friction >= cluster.wins * 2 && cluster.chats >= 6
+                : daysSinceLast != null && daysSinceLast > 120 && cluster.friction > cluster.wins && cluster.chats >= 8
                   ? "abandoned"
                   : "unknown";
 
-          const label =
-            cluster.primaryStack !== "General"
-              ? `${themeTitle(cluster.projectKey)} (${cluster.primaryStack})`
-              : themeTitle(cluster.projectKey);
+          const label = stackTop ? `${themeTitle(cluster.projectKey)} (${stackTop})` : themeTitle(cluster.projectKey);
 
           return {
             projectLabel: label,
-            whatYouBuilt: whatBuilt(cluster.projectKey),
+            whatYouBuilt: whatBuilt(cluster.projectKey, topDeliverable, stackTop),
             stack,
             monthsActive,
             chats: cluster.chats,
@@ -1438,55 +1740,96 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
           };
         });
 
+      const seen = new Map<string, number>();
+      const projectSummaries = projectSummariesRaw.map((p) => {
+        const n = (seen.get(p.projectLabel) ?? 0) + 1;
+        seen.set(p.projectLabel, n);
+        if (n === 1) return p;
+        return { ...p, projectLabel: `${p.projectLabel} #${n}` };
+      });
+
       return projectSummaries;
     })();
 
     const bossFights = (() => {
-      const indecisionTotal = conversations.reduce((acc, c) => acc + c.indecisionSignals, 0);
-      const candidates: RewindBossFight[] = [];
+      const contextLabel = (key: string | null): string | null => {
+        if (!key) return null;
+        const theme = PROJECT_THEMES.find((t) => t.key === key);
+        if (theme) return theme.label;
+        const topic = TOPIC_BUCKETS.find((t) => t.key === key);
+        if (topic) return topic.label;
+        return null;
+      };
 
-      if (behavior.brokenCount > 0) {
-        const phrase = behavior.whyBrokenCount >= behavior.doesntWorkCount ? "why is this broken" : "doesn't work";
-        candidates.push({
-          title: "Your biggest enemy",
-          count: behavior.brokenCount,
-          example: `"${phrase}"`,
-        });
-      }
-      if (behavior.againCount + behavior.stillCount > 0) {
-        candidates.push({
+      const peakMonthFor = (matches: RewindConversationSummary[]) => {
+        const counts = new Map<string, number>();
+        for (const conv of matches) {
+          if (!conv.month) continue;
+          counts.set(conv.month, (counts.get(conv.month) ?? 0) + 1);
+        }
+        const peak = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+        return peak ? monthLabel(peak) : null;
+      };
+
+      const duringFor = (matches: RewindConversationSummary[]) => {
+        const counts = new Map<string, number>();
+        for (const conv of matches) {
+          const key = conv.themeKey ?? conv.topicKey ?? null;
+          if (!key) continue;
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        const topKey = Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+        return contextLabel(topKey);
+      };
+
+      const buildFight = (fight: {
+        title: string;
+        example: string;
+        predicate: (c: RewindConversationSummary) => boolean;
+      }): RewindBossFight | null => {
+        const matches = conversations.filter(fight.predicate);
+        if (matches.length === 0) return null;
+        const peak = peakMonthFor(matches);
+        const during = duringFor(matches);
+        const intensityLine =
+          peak ? `in ${matches.length.toLocaleString()} chats · peaked ${peak}` : `in ${matches.length.toLocaleString()} chats`;
+        return {
+          title: fight.title,
+          chats: matches.length,
+          peak,
+          during,
+          example: fight.example,
+          intensityLine,
+        };
+      };
+
+      const fights: Array<ReturnType<typeof buildFight>> = [
+        buildFight({
+          title: "The “doesn't work” era",
+          example: "\"doesn't work\"",
+          predicate: (c) => c.hasBroken,
+        }),
+        buildFight({
           title: "Again. Still. Again.",
-          count: behavior.againCount + behavior.stillCount,
           example: "\"again\" / \"still\"",
-        });
-      }
-      if (behavior.wtfCount > 0) {
-        candidates.push({ title: "WTF moments", count: behavior.wtfCount, example: "\"wtf\"" });
-      }
-      if (behavior.questionBurstMessageCount > 0) {
-        candidates.push({
-          title: "The ??? spiral",
-          count: behavior.questionBurstMessageCount,
-          example: "\"???\"",
-        });
-      }
-      if (behavior.yellingMessageCount > 0) {
-        candidates.push({
-          title: "CAPS LOCK cameo",
-          count: behavior.yellingMessageCount,
-          example: "CAPS",
-        });
-      }
-      if (indecisionTotal > 0) {
-        candidates.push({
+          predicate: (c) => c.hasAgainStill,
+        }),
+        buildFight({
+          title: "WTF moments",
+          example: "\"wtf\"",
+          predicate: (c) => c.hasWtf,
+        }),
+        buildFight({
           title: "Decision paralysis",
-          count: indecisionTotal,
           example: "\"should i\"",
-        });
-      }
+          predicate: (c) => c.indecisionSignals > 0,
+        }),
+      ];
 
-      candidates.sort((a, b) => b.count - a.count);
-      return candidates.slice(0, 3);
+      return fights
+        .filter((f): f is RewindBossFight => Boolean(f))
+        .sort((a, b) => b.chats - a.chats)
+        .slice(0, 3);
     })();
 
     const wins = (() => {
@@ -1572,6 +1915,351 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       };
     })();
 
+    const rabbitHoles = (() => {
+      const dayMs = 24 * 60 * 60 * 1000;
+      const blacklist = new Set(["Git", "GitHub", "Windows", "Linux", "macOS"]);
+
+      const formatDayRange = (startKey: string, endKey: string) => {
+        const start = parseDayKeyLocal(startKey);
+        const end = parseDayKeyLocal(endKey);
+        if (!start || !end) return `${startKey} → ${endKey}`;
+        const startMonth = (monthNames[start.getMonth()] ?? "").slice(0, 3);
+        const endMonth = (monthNames[end.getMonth()] ?? "").slice(0, 3);
+        if (startKey === endKey) return `${startMonth} ${start.getDate()}`;
+        if (start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth()) {
+          return `${startMonth} ${start.getDate()}–${end.getDate()}`;
+        }
+        return `${startMonth} ${start.getDate()}–${endMonth} ${end.getDate()}`;
+      };
+
+      const bestBurstWindow = (byDay: Map<string, number>) => {
+        const days = Array.from(byDay.entries())
+          .map(([dayKey, chats]) => ({ dayKey, chats, ms: dayKeyUtcMs(dayKey) }))
+          .filter((d): d is { dayKey: string; chats: number; ms: number } => d.ms != null)
+          .sort((a, b) => a.ms - b.ms);
+        if (days.length === 0) return null;
+
+        let start = 0;
+        let sum = 0;
+        let best:
+          | { startKey: string; endKey: string; chats: number; days: number; density: number }
+          | null = null;
+
+        for (let end = 0; end < days.length; end++) {
+          sum += days[end].chats;
+          while (days[end].ms - days[start].ms > 6 * dayMs) {
+            sum -= days[start].chats;
+            start += 1;
+          }
+          const spanDays = Math.round((days[end].ms - days[start].ms) / dayMs) + 1;
+          const density = spanDays > 0 ? sum / spanDays : 0;
+          if (
+            !best ||
+            density > best.density ||
+            (density === best.density && sum > best.chats) ||
+            (density === best.density && sum === best.chats && spanDays < best.days)
+          ) {
+            best = { startKey: days[start].dayKey, endKey: days[end].dayKey, chats: sum, days: spanDays, density };
+          }
+        }
+        return best;
+      };
+
+      const holes = new Map<string, { key: string; byDay: Map<string, number>; totalChats: number }>();
+      for (const conv of conversations) {
+        const dayKey = conv.startDay ?? conv.endDay;
+        if (!dayKey) continue;
+        const key = conv.stack.find((t) => !blacklist.has(t)) ?? null;
+        if (!key) continue;
+        const current = holes.get(key) ?? { key, byDay: new Map<string, number>(), totalChats: 0 };
+        current.totalChats += 1;
+        current.byDay.set(dayKey, (current.byDay.get(dayKey) ?? 0) + 1);
+        holes.set(key, current);
+      }
+
+      const scored = Array.from(holes.values())
+        .map((hole) => {
+          const burst = bestBurstWindow(hole.byDay);
+          if (!burst) return null;
+          const fraction = hole.totalChats > 0 ? burst.chats / hole.totalChats : 0;
+          const score = burst.density * 5 + fraction * 3 + burst.chats;
+          return { hole, burst, score };
+        })
+        .filter(
+          (x): x is { hole: { key: string; byDay: Map<string, number>; totalChats: number }; burst: NonNullable<ReturnType<typeof bestBurstWindow>>; score: number } =>
+            Boolean(x),
+        )
+        .filter((x) => x.burst.chats >= 3)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+
+      return scored.map(({ hole, burst }) => {
+        const range = formatDayRange(burst.startKey, burst.endKey);
+        const why =
+          burst.days <= 3 && burst.chats >= 5
+            ? "It took over your brain for a few days."
+            : burst.days <= 7 && burst.chats >= 6
+              ? "It ate a whole week."
+              : "A brief obsession.";
+        return {
+          title: hole.key,
+          range,
+          chats: burst.chats,
+          days: burst.days,
+          why,
+          excerpt: null,
+        };
+      });
+    })();
+
+    const lifeHighlights = (() => {
+      const titleCase = (value: string) =>
+        value
+          .split(/\s+/)
+          .filter(Boolean)
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ");
+
+      const peakMonthLabel = (months: Map<string, number>): string | null => {
+        const best = Array.from(months.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+        return best ? monthLabel(best) : null;
+      };
+
+      const candidates = Array.from(lifeHighlightAccumulators.values())
+        .filter((c) => c.chats >= 2 || c.type === "travel")
+        .sort((a, b) => b.chats - a.chats);
+
+      const picked: RewindWrappedSummary["lifeHighlights"] = [];
+      const perType = new Map<string, number>();
+
+      const push = (c: { type: string; label: string; chats: number; months: Map<string, number> }) => {
+        const count = perType.get(c.type) ?? 0;
+        if (count >= 2) return;
+        perType.set(c.type, count + 1);
+
+        const month = peakMonthLabel(c.months);
+        const confidence = Math.min(0.98, 0.45 + c.chats / 10);
+
+        const title =
+          c.type === "travel"
+            ? `Trip planning: ${c.label}`
+            : c.type === "career"
+              ? `${titleCase(c.label)} season`
+              : c.type === "learning"
+                ? `Learning: ${titleCase(c.label)}`
+                : c.type === "fitness"
+                  ? `${titleCase(c.label)} era`
+                  : c.type === "food"
+                    ? `${titleCase(c.label)} phase`
+                    : c.type === "hobby" || c.type === "fun"
+                      ? `${titleCase(c.label)} cameo`
+                      : `${titleCase(c.label)} moment`;
+
+        const line =
+          c.type === "travel"
+            ? "You mapped it out before you went."
+            : c.type === "career"
+              ? "You brought real life decisions here. Respect."
+              : c.type === "learning"
+                ? "You kept trying until it stuck."
+                : c.type === "fitness"
+                  ? "You tried to be that person. For real."
+                  : c.type === "food"
+                    ? "A whole phase. We saw it."
+                    : c.type === "hobby" || c.type === "fun"
+                      ? "A random obsession that fully counted."
+                      : "It came up enough to be a thing.";
+
+        picked.push({
+          type: c.type,
+          month,
+          title,
+          line,
+          confidence,
+          excerpt: c.type === "travel" ? c.label : c.label,
+        });
+      };
+
+      for (const c of candidates) {
+        if (picked.length >= 8) break;
+        push(c);
+      }
+
+      const fillFromTopics = () => {
+        const topic = topTopics.find((t) => t.key !== "coding") ?? topTopics[0];
+        if (!topic) return;
+        picked.push({
+          type: "theme",
+          month: busiestMonthKey ? monthLabel(busiestMonthKey) : null,
+          title: `${topic.emoji} ${topic.label}`,
+          line: "Not a one-off. A recurring theme.",
+          confidence: 0.5,
+          excerpt: null,
+        });
+      };
+
+      while (picked.length < 5) fillFromTopics();
+      return picked.slice(0, 8);
+    })();
+
+    const bestMoments = (() => {
+      const pickMonth = (m: string | null) => (m ? monthLabel(m) : null);
+
+      const funniest = (() => {
+        const candidate = conversations
+          .filter((c) => c.hasQuickIntro)
+          .sort((a, b) => b.userMessages - a.userMessages)[0];
+        if (!candidate) return null;
+        return {
+          title: "The “quick question” lie",
+          month: pickMonth(candidate.month),
+          line: `You said “quick question”. It turned into ${candidate.userMessages.toLocaleString()} prompts.`,
+          excerpt: "\"quick question\"",
+        };
+      })();
+
+      const intense = (() => {
+        const candidate = [...conversations].sort((a, b) => b.maxPromptChars - a.maxPromptChars)[0];
+        if (!candidate || candidate.maxPromptChars <= 0) return null;
+        return {
+          title: "Most intense moment",
+          month: pickMonth(candidate.month),
+          line: `One prompt hit ${candidate.maxPromptChars.toLocaleString()} characters. You meant business.`,
+          excerpt: null,
+        };
+      })();
+
+      const biggestWin = (() => {
+        const candidate = conversations
+          .filter((c) => c.comeback)
+          .sort((a, b) => b.winSignals - a.winSignals)[0];
+        if (!candidate) return null;
+        return {
+          title: "Biggest win",
+          month: pickMonth(candidate.month),
+          line: "Stuck → solved. You pulled it off.",
+          excerpt: null,
+        };
+      })();
+
+      const facepalm = (() => {
+        const candidate = conversations
+          .filter((c) => c.mood === "frustrated" && c.winSignals === 0)
+          .sort((a, b) => b.frictionSignals - a.frictionSignals)[0];
+        if (!candidate) return null;
+        return {
+          title: "Biggest facepalm",
+          month: pickMonth(candidate.month),
+          line: "You tried everything. The universe said no.",
+          excerpt: candidate.hasBroken ? "\"doesn't work\"" : null,
+        };
+      })();
+
+      const wholesome = (() => {
+        const candidate = conversations.filter((c) => c.mood === "flow").sort((a, b) => b.winSignals - a.winSignals)[0];
+        if (!candidate) return null;
+        return {
+          title: "Most wholesome streak",
+          month: pickMonth(candidate.month),
+          line: "Low chaos. High momentum. More of that.",
+          excerpt: null,
+        };
+      })();
+
+      const out: RewindWrappedSummary["bestMoments"] = [];
+      [funniest, intense, biggestWin, facepalm, wholesome].forEach((m) => {
+        if (m) out.push(m);
+      });
+      return out.slice(0, 5);
+    })();
+
+    const growthUpgrades = (() => {
+      const upgrades: RewindWrappedSummary["growthUpgrades"] = [];
+
+      if (earlyMessageCount >= 25 && lateMessageCount >= 25) {
+        const earlyHedgeRate = earlyHedgeMessages / earlyMessageCount;
+        const lateHedgeRate = lateHedgeMessages / lateMessageCount;
+        const deltaPts = Math.round((lateHedgeRate - earlyHedgeRate) * 100);
+        if (Math.abs(deltaPts) >= 8) {
+          upgrades.push({
+            title: "Less “maybe”, more direct",
+            line:
+              deltaPts < 0
+                ? "You got more decisive as the year went on."
+                : "You got more cautious later in the year (still valid).",
+            delta: `${Math.abs(deltaPts)} pts`,
+          });
+        }
+
+        const earlyConstraintRate = earlyConstraintMessages / earlyMessageCount;
+        const lateConstraintRate = lateConstraintMessages / lateMessageCount;
+        const constraintDeltaPts = Math.round((lateConstraintRate - earlyConstraintRate) * 100);
+        if (Math.abs(constraintDeltaPts) >= 8) {
+          upgrades.push({
+            title: "More constraints, fewer guesses",
+            line:
+              constraintDeltaPts > 0
+                ? "You started telling the AI exactly what you wanted."
+                : "You loosened up later in the year. Freedom arc.",
+            delta: `${Math.abs(constraintDeltaPts)} pts`,
+          });
+        }
+      }
+
+      if (earlyTurnsToWinCount >= 8 && lateTurnsToWinCount >= 8) {
+        const avgEarly = earlyTurnsToWinSum / earlyTurnsToWinCount;
+        const avgLate = lateTurnsToWinSum / lateTurnsToWinCount;
+        const diff = Math.round(avgLate - avgEarly);
+        if (Math.abs(diff) >= 1) {
+          upgrades.push({
+            title: "Faster from stuck → solved",
+            line: diff < 0 ? "You got to the win in fewer turns." : "You took longer later in the year (bigger problems).",
+            delta: `${Math.abs(diff)} turns`,
+          });
+        }
+      }
+
+      if (promptLengthChangePercent != null && Math.abs(promptLengthChangePercent) >= 10) {
+        upgrades.push({
+          title: "Your prompt style changed",
+          line:
+            promptLengthChangePercent < 0
+              ? "Early-year: essays. End-of-year: commands."
+              : "More context, more control. You stopped winging it.",
+          delta: `${Math.abs(promptLengthChangePercent)}%`,
+        });
+      }
+
+      return upgrades.slice(0, 5);
+    })();
+
+    const youVsYou = (() => {
+      const lines: string[] = [];
+      const busiestByChats = Array.from(monthStats.entries()).sort((a, b) => b[1].chats - a[1].chats)[0];
+      if (busiestByChats && monthStats.size >= 3) {
+        const [monthKey, stats] = busiestByChats;
+        const avg = totalConversations / monthStats.size;
+        const ratio = avg > 0 ? stats.chats / avg : 0;
+        if (ratio >= 1.3) {
+          lines.push(`${monthLabel(monthKey)} was ${ratio.toFixed(1)}× your average month.`);
+        }
+      }
+
+      const mostDecisive = (() => {
+        const entries = Array.from(monthStats.entries());
+        const withEnough = entries.filter(([, s]) => s.chats >= 10);
+        if (withEnough.length === 0) return null;
+        const best = withEnough
+          .map(([k, s]) => ({ k, score: s.chats > 0 ? s.indecision / s.chats : 0 }))
+          .sort((a, b) => a.score - b.score)[0];
+        return best?.k ? monthLabel(best.k) : null;
+      })();
+
+      if (mostDecisive) lines.push(`Most decisive month: ${mostDecisive}. (Lowest “should I” energy.)`);
+      if (lateNightPercent <= 10) lines.push(`Late-night chats were only ${lateNightPercent}%. You spiraled offline, apparently.`);
+      return lines.slice(0, 3);
+    })();
+
     const archetype = (() => {
       const top = topTopics[0]?.key ?? null;
       const builderProjects = projects.length;
@@ -1607,7 +2295,7 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
               : "Not a phase. Just a very useful second brain.";
 
       const roast =
-        bossFights[0]?.title === "Your biggest enemy" && bossFights[0]?.example
+        bossFights[0]?.example
           ? `Your biggest enemy this year: ${bossFights[0].example}.`
           : behavior.pleaseCount >= 200
             ? `You said "please" ${behavior.pleaseCount.toLocaleString()} times. Polite. Until it didn't work.`
@@ -1695,11 +2383,17 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
       comebackMoment,
       timeline,
       weirdRabbitHole,
+      rabbitHoles,
+      lifeHighlights,
+      bestMoments,
+      growthUpgrades,
+      youVsYou,
       forecast,
       closingLine,
     };
 
     return {
+      coverage,
       totalConversations,
       totalUserMessages,
       activeDays: activeDaysSet.size,
@@ -1722,7 +2416,10 @@ export function createRewindAnalyzer(options?: { now?: Date; daysBack?: number }
   return { addConversation, summary };
 }
 
-export function analyzeChatExport(conversations: unknown[], options?: { now?: Date; daysBack?: number }): RewindSummary {
+export function analyzeChatExport(
+  conversations: unknown[],
+  options?: { now?: Date; daysBack?: number; since?: Date; until?: Date },
+): RewindSummary {
   const analyzer = createRewindAnalyzer(options);
   for (const conv of conversations) analyzer.addConversation(conv);
   return analyzer.summary();

@@ -10,6 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { createRewindAnalyzer } from "@/lib/rewind";
 import type { RewindSummary } from "@/lib/rewind";
 import { logAnalysisError } from "@/lib/logAnalysisError";
+import { sanitizeRewindForStorage } from "@/lib/rewindSanitize";
 
 export const runtime = "nodejs";
 
@@ -141,6 +142,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "no_data" }, { status: 400 });
     }
 
+    const sanitizedRewind = sanitizeRewindForStorage(rewind);
     const year = new Date().getFullYear();
 
     let rewindId: string | null = null;
@@ -149,7 +151,7 @@ export async function POST(request: Request) {
         data: {
           clientId,
           year,
-          summaryJson: rewind as unknown as Prisma.InputJsonValue,
+          summaryJson: sanitizedRewind as unknown as Prisma.InputJsonValue,
         },
       });
       rewindId = dbRewind.id;
@@ -168,7 +170,7 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json({ rewind, rewindId });
+    return NextResponse.json({ rewind: sanitizedRewind, rewindId });
   } catch (error) {
     console.error("Rewind endpoint failed", error);
     await logAnalysisError({
