@@ -114,10 +114,13 @@ const pickTopNickname = (nicknames: PhraseInsight[]) => {
 
 export function generateRewindBangers(
   summary: RewindSummary,
-  options: { spice: SpiceLevel; includeSpicyWords?: boolean },
+  options: { spice: SpiceLevel; includeSpicyWords?: boolean; includePersonalDetails?: boolean; name?: string },
 ): { page: RewindBanger[]; share: RewindBanger[]; all: RewindBanger[] } {
   const spice = options.spice;
   const includeSpicyWords = Boolean(options.includeSpicyWords) && spice !== "mild";
+  const includePersonalDetails = Boolean(options.includePersonalDetails);
+  const name = (options.name ?? "").trim();
+  const withName = (line: string) => (includePersonalDetails && name ? line.replace(/^You\b/, `${name}, you`) : line);
 
   const b = summary.behavior;
   const wrapped = summary.wrapped;
@@ -166,8 +169,10 @@ export function generateRewindBangers(
 
   const candidates: RewindBanger[] = [];
   const add = (banger: Omit<RewindBanger, "shareable">) => {
-    const shareable = isShareable(banger.line1, banger.line2);
-    candidates.push({ ...banger, shareable });
+    const line1 = withName(banger.line1);
+    const line2 = banger.line2 ? withName(banger.line2) : undefined;
+    const shareable = isShareable(line1, line2);
+    candidates.push({ ...banger, line1, line2, shareable });
   };
 
   // How deep you went (identity line).
@@ -193,22 +198,34 @@ export function generateRewindBangers(
       spicy: `You built ${formatCount(projectCount)} different things. Not casual.`,
       savage: `You built ${formatCount(projectCount)} different things. Then you came back for more.`,
     });
+    const topBuildLabel = topProject
+      ? includePersonalDetails
+        ? topProject.projectLabelPrivate ?? topProject.projectLabel
+        : topProject.projectLabel
+      : null;
     add({
       id: "projects",
       category: "projects",
       line1,
-      line2: topProject ? `Top build: ${topProject.projectLabel}.` : undefined,
+      line2: topBuildLabel ? `Top build: ${topBuildLabel}.` : undefined,
       score: 88 + scoreFromCount(projectCount) + scoreFromLength(line1),
     });
   }
 
   // Trips (no destinations in share-safe lines).
   if (tripCount > 0) {
-    const line1 = bySpice(spice, {
-      mild: `You planned ${formatCount(tripCount)} trips with me.`,
-      spicy: `You planned ${formatCount(tripCount)} trips with me.`,
-      savage: `You planned ${formatCount(tripCount)} trips with me. Surprises were not invited.`,
-    });
+    const personalDest = includePersonalDetails ? topTrip?.destination : null;
+    const line1 = personalDest
+      ? bySpice(spice, {
+          mild: `You planned a trip to ${personalDest}.`,
+          spicy: `You planned a trip to ${personalDest}.`,
+          savage: `You planned a trip to ${personalDest}. Surprises were not invited.`,
+        })
+      : bySpice(spice, {
+          mild: `You planned ${formatCount(tripCount)} trips with me.`,
+          spicy: `You planned ${formatCount(tripCount)} trips with me.`,
+          savage: `You planned ${formatCount(tripCount)} trips with me. Surprises were not invited.`,
+        });
     add({
       id: "trips",
       category: "trips",
@@ -242,10 +259,11 @@ export function generateRewindBangers(
     (topHighlight.type === "language" || topHighlight.type === "fitness" || topHighlight.type === "food")
   ) {
     const evidenceChats = topHighlight.evidence.length;
+    const title = includePersonalDetails && topHighlight.titlePrivate ? topHighlight.titlePrivate : topHighlight.title;
     const line1 = bySpice(spice, {
-      mild: `${topHighlight.title}.`,
-      spicy: `${topHighlight.title}. Plot twist.`,
-      savage: `${topHighlight.title}. You really committed to the bit.`,
+      mild: `${title}.`,
+      spicy: `${title}. Plot twist.`,
+      savage: `${title}. You really committed to the bit.`,
     });
     add({
       id: "highlight",

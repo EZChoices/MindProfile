@@ -64,6 +64,12 @@ type ShareInsight = { headline: string; subhead?: string };
 
 const bySpice = (spice: SpiceLevel, variants: { mild: string; spicy: string; savage: string }) => variants[spice];
 
+const personalizeYouLine = (name: string, line: string) => {
+  const trimmedName = name.trim();
+  if (!trimmedName) return line;
+  return line.replace(/^You\b/, `${trimmedName}, you`);
+};
+
 const topicMeaning = (key: string | undefined) => {
   switch (key) {
     case "coding":
@@ -278,7 +284,9 @@ export default function RewindPage() {
   const [spice, setSpice] = useState<SpiceLevel>("spicy");
   const [includeSpicyWords, setIncludeSpicyWords] = useState(false);
   const [includeExamples, setIncludeExamples] = useState(true);
-  const [allowRedactedExcerpts, setAllowRedactedExcerpts] = useState(false);
+  const [allowRedactedExcerpts, setAllowRedactedExcerpts] = useState(true);
+  const [sharePersonalDetails, setSharePersonalDetails] = useState(false);
+  const [displayName, setDisplayName] = useState("");
   const [sharePick, setSharePick] = useState(0);
   const [dismissedHighlights, setDismissedHighlights] = useState<string[]>([]);
   const [dismissedRabbitHoles, setDismissedRabbitHoles] = useState<string[]>([]);
@@ -292,6 +300,23 @@ export default function RewindPage() {
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("mindprofile_rewind_name");
+      if (saved) setDisplayName(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("mindprofile_rewind_name", displayName);
+    } catch {
+      // ignore
+    }
+  }, [displayName]);
+
+  useEffect(() => {
     if (!shareStatus) return;
     const t = window.setTimeout(() => setShareStatus(null), 2500);
     return () => window.clearTimeout(t);
@@ -303,7 +328,15 @@ export default function RewindPage() {
 
   useEffect(() => {
     setSharePick(0);
-  }, [spice, includeSpicyWords, dismissedHighlights.length, dismissedRabbitHoles.length, rewind?.totalConversations]);
+  }, [
+    spice,
+    includeSpicyWords,
+    sharePersonalDetails,
+    displayName,
+    dismissedHighlights.length,
+    dismissedRabbitHoles.length,
+    rewind?.totalConversations,
+  ]);
 
   const dismissedHighlightsSet = new Set(dismissedHighlights);
   const dismissedRabbitHolesSet = new Set(dismissedRabbitHoles);
@@ -318,7 +351,14 @@ export default function RewindPage() {
       }
     : null;
 
-  const bangerPack = rewindForBangers ? generateRewindBangers(rewindForBangers, { spice, includeSpicyWords }) : null;
+  const bangerPack = rewindForBangers
+    ? generateRewindBangers(rewindForBangers, {
+        spice,
+        includeSpicyWords,
+        includePersonalDetails: sharePersonalDetails,
+        name: displayName,
+      })
+    : null;
   const shareBangers = bangerPack?.share ?? [];
   const currentShareBanger: RewindBanger | null =
     shareBangers.length > 0 ? shareBangers[sharePick % shareBangers.length] : null;
@@ -347,6 +387,73 @@ export default function RewindPage() {
   const lowLifeHighlights = visibleLifeHighlights.filter((h) => h.level !== "high");
 
   const visibleRabbitHoles = rewind ? rewind.wrapped.rabbitHoles.filter((h) => !dismissedRabbitHolesSet.has(h.key)) : [];
+
+  const mindProfileYearBullets = (() => {
+    if (!rewind) return [];
+    const name = displayName.trim();
+    const you = name ? `${name}, you` : "You";
+
+    const bullets: string[] = [];
+    const promptsPerChat =
+      rewind.totalConversations > 0 ? Math.round(rewind.totalUserMessages / rewind.totalConversations) : 0;
+
+    if (rewind.behavior.stepByStepCount >= 15 || promptsPerChat >= 12) {
+      bullets.push(`${you} don’t ask once. You iterate. Then you iterate again.`);
+    } else if (rewind.avgPromptChars != null && rewind.avgPromptChars >= 900) {
+      bullets.push(`${you} think out loud in paragraphs — context first, clarity later.`);
+    } else {
+      bullets.push(`${you} move fast: quick asks, quick pivots, repeat.`);
+    }
+
+    const hasChaos =
+      rewind.behavior.brokenCount > 0 ||
+      rewind.behavior.wtfCount > 0 ||
+      rewind.behavior.spicyWordCount > 0 ||
+      rewind.behavior.yellingMessageCount > 0;
+
+    if (rewind.behavior.pleaseCount >= 50 && hasChaos) {
+      bullets.push(`${you} stayed polite… until it didn’t work.`);
+    } else if (rewind.behavior.pleaseCount >= 50) {
+      bullets.push(`${you} ran polite mode all year. Respectfully.`);
+    } else if (hasChaos) {
+      bullets.push(`${you} didn’t sugarcoat it when things broke.`);
+    }
+
+    const topBuild = rewind.wrapped.projects[0] ?? null;
+    if (topBuild) {
+      const label =
+        includeExamples && allowRedactedExcerpts && topBuild.projectLabelPrivate
+          ? topBuild.projectLabelPrivate
+          : topBuild.projectLabel;
+      bullets.push(
+        `${you} built ${rewind.wrapped.projects.length.toLocaleString()} things. The loudest era: ${label}.`,
+      );
+    }
+
+    const topTrip = rewind.wrapped.trips.topTrips[0] ?? null;
+    if (rewind.wrapped.trips.tripCount > 0 && topTrip) {
+      const tripLabel =
+        includeExamples && allowRedactedExcerpts && topTrip.titlePrivate ? topTrip.titlePrivate : topTrip.title;
+      bullets.push(`${you} planned ${rewind.wrapped.trips.tripCount.toLocaleString()} trips. Including ${tripLabel}.`);
+    }
+
+    const topFood = highLifeHighlights.find((h) => h.type === "food") ?? null;
+    if (topFood) {
+      const foodLabel =
+        includeExamples && allowRedactedExcerpts && topFood.titlePrivate ? topFood.titlePrivate : topFood.title;
+      bullets.push(`${you} asked me about ${foodLabel}. Priorities.`);
+    }
+
+    if (rewind.promptLengthChangePercent != null && Math.abs(rewind.promptLengthChangePercent) >= 10) {
+      bullets.push(
+        rewind.promptLengthChangePercent < 0
+          ? `${you} went from essays → commands. Fewer words. More intent.`
+          : `${you} started bringing more context later in the year. More control.`,
+      );
+    }
+
+    return bullets.slice(0, 4);
+  })();
 
   const buildShareText = (insight: ShareInsight) =>
     insight.subhead ? `${insight.headline}\n${insight.subhead}` : insight.headline;
@@ -413,7 +520,7 @@ export default function RewindPage() {
     setSharePick(0);
     setIncludeSpicyWords(false);
     setIncludeExamples(true);
-    setAllowRedactedExcerpts(false);
+    setAllowRedactedExcerpts(true);
     setDismissedHighlights([]);
     setDismissedRabbitHoles([]);
   };
@@ -492,7 +599,7 @@ export default function RewindPage() {
     setSharePick(0);
     setIncludeSpicyWords(false);
     setIncludeExamples(true);
-    setAllowRedactedExcerpts(false);
+    setAllowRedactedExcerpts(true);
     setDismissedHighlights([]);
     setDismissedRabbitHoles([]);
   };
@@ -636,7 +743,7 @@ export default function RewindPage() {
                 {loading ? "Generating your Rewind..." : "Generate my Rewind"}
               </button>
               <p className="muted text-xs text-slate-200">
-                Your export stays private — we anonymize and only save a redacted summary (no raw chats).
+                Your export stays on this device — we only save a summary (no raw chats).
               </p>
             </div>
           </form>
@@ -653,7 +760,9 @@ export default function RewindPage() {
                    <div className="mt-3 text-2xl font-semibold text-white">
                      {rewind.wrapped.archetype.title}
                    </div>
-                   <p className="muted mt-2 text-sm text-slate-200">{rewind.wrapped.archetype.line}</p>
+                   <p className="muted mt-2 text-sm text-slate-200">
+                     {personalizeYouLine(displayName, rewind.wrapped.archetype.line)}
+                   </p>
                    <p className="muted mt-2 text-xs text-slate-200">Coverage: {formatCoverage(rewind.coverage)}</p>
                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -674,10 +783,33 @@ export default function RewindPage() {
                         {rewind.activeDays.toLocaleString()}
                       </div>
                     </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Longest streak</div>
+                      <div className="mt-2 text-2xl font-semibold text-white">
+                        {rewind.wrapped.timeline.longestStreakDays != null
+                          ? rewind.wrapped.timeline.longestStreakDays.toLocaleString()
+                          : "-"}
+                      </div>
+                      <p className="muted mt-1 text-xs text-slate-200">Days in a row.</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Avg prompt</div>
+                      <div className="mt-2 text-2xl font-semibold text-white">
+                        {rewind.avgPromptChars != null ? rewind.avgPromptChars.toLocaleString() : "-"}
+                      </div>
+                      <p className="muted mt-1 text-xs text-slate-200">Characters.</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Longest prompt</div>
+                      <div className="mt-2 text-2xl font-semibold text-white">
+                        {rewind.longestPromptChars != null ? rewind.longestPromptChars.toLocaleString() : "-"}
+                      </div>
+                      <p className="muted mt-1 text-xs text-slate-200">Characters. An epic ask.</p>
+                    </div>
                   </div>
 
                   <p className="mt-4 text-sm text-slate-100">
-                    <b>{rewind.wrapped.hook.brag}</b>
+                    <b>{personalizeYouLine(displayName, rewind.wrapped.hook.brag)}</b>
                   </p>
 
                   {rewind.topTopics[0] && (
@@ -693,7 +825,9 @@ export default function RewindPage() {
                     </p>
                   )}
 
-                  <p className="mt-3 text-sm text-slate-100">{rewind.wrapped.hook.roast}</p>
+                  <p className="mt-3 text-sm text-slate-100">
+                    {personalizeYouLine(displayName, rewind.wrapped.hook.roast)}
+                  </p>
                 </div>
 
                 <div className="flex flex-col gap-3 sm:items-end">
@@ -744,7 +878,18 @@ export default function RewindPage() {
                     </div>
                   </div>
 
-                  <div className="flex flex-col gap-2 text-xs text-slate-200 sm:items-end">
+                  <div className="flex flex-col gap-3 text-xs text-slate-200 sm:items-end">
+                    <label className="grid gap-1">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-200">
+                        Name (optional)
+                      </span>
+                      <input
+                        value={displayName}
+                        onChange={(e) => setDisplayName(e.currentTarget.value)}
+                        placeholder="e.g. Maan"
+                        className="w-56 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+                      />
+                    </label>
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -761,9 +906,22 @@ export default function RewindPage() {
                         onChange={(e) => setAllowRedactedExcerpts(e.currentTarget.checked)}
                         className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
                       />
-                      Allow small redacted excerpts (private)
+                      Show small excerpts (private)
                     </label>
-                    <p className="muted text-[11px] text-slate-200">Sharing stays safe. No raw prompts.</p>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={sharePersonalDetails}
+                        onChange={(e) => setSharePersonalDetails(e.currentTarget.checked)}
+                        className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                      />
+                      Share can include names/places
+                    </label>
+                    <p className="muted text-[11px] text-slate-200">
+                      {sharePersonalDetails
+                        ? "Sharing can include personal details. Double-check before posting."
+                        : "Sharing stays safe by default. No raw prompts."}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -815,6 +973,20 @@ export default function RewindPage() {
                 </div>
               </div>
             </div>
+
+            {mindProfileYearBullets.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">MindProfile: year edition</div>
+                <p className="muted mt-3 text-sm text-slate-100">Not a report. A mirror.</p>
+                <ul className="mt-5 space-y-2 text-sm text-slate-100">
+                  {mindProfileYearBullets.map((line) => (
+                    <li key={line} className="leading-relaxed">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {rewind.wrapped.trips.tripCount > 0 && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
@@ -1428,9 +1600,11 @@ export default function RewindPage() {
               </div>
               <div className="mt-4 grid gap-2 text-sm text-slate-100">
                 {closingReflectionLines(rewind, spice).map((line) => (
-                  <p key={line}>{line}</p>
+                  <p key={line}>{personalizeYouLine(displayName, line)}</p>
                 ))}
-                <p className="mt-2 font-semibold text-white">{rewind.wrapped.closingLine}</p>
+                <p className="mt-2 font-semibold text-white">
+                  {personalizeYouLine(displayName, rewind.wrapped.closingLine)}
+                </p>
               </div>
             </div>
 

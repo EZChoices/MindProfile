@@ -566,6 +566,8 @@ const FITNESS_TECH_EXCLUDE = /\b(running|run)\s+(?:the\s+)?(code|script|program|
 const FOOD_EVENT_PATTERNS: RegExp[] = [
   /\b(trying|tried|started|starting|learning)\s+(?:to\s+)?(baking|cooking)\b/i,
   /\b(baking|cooking)\s+(?:phase|era)\b/i,
+  /\brecipe\s+(?:for|on)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z0-9' -]{2,40})\b/i,
+  /\b(?:how to\s+)?(?:cook|make|bake|grill|sous vide|sear|smoke|roast)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z0-9' -]{2,40})\b/i,
   /\b(recipe|recipes)\b/i,
 ];
 
@@ -770,6 +772,17 @@ const tokenize = (textLower: string): string[] =>
 
 const compressWhitespace = (text: string) => text.replace(/\s+/g, " ").trim();
 
+const isBoringSnippet = (snippet: string) => {
+  const lower = snippet.trim().toLowerCase();
+  if (!lower) return true;
+  if (lower.length < 12) return true;
+  if (lower === "hi" || lower === "hello" || lower === "thanks" || lower === "thank you") return true;
+
+  const tokens = lower.split(/\s+/).filter(Boolean);
+  const significant = tokens.filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+  return significant.length < 1;
+};
+
 const stripCodeBlocks = (text: string) =>
   text
     .replace(/```[\s\S]*?```/g, " ")
@@ -798,13 +811,13 @@ const looksTechnicalContext = (textLower: string) => TECH_CONTEXT_PATTERN.test(t
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 0.99 ? 0.99 : n);
 
-const makeSafeSnippet = (raw: string, opts?: { maxWords?: number; maxChars?: number }): string | null => {
-  const maxWords = opts?.maxWords ?? 8;
-  const maxChars = opts?.maxChars ?? 72;
+const makeSnippet = (raw: string, opts?: { maxWords?: number; maxChars?: number; redactNames?: boolean }): string | null => {
+  const maxWords = opts?.maxWords ?? 10;
+  const maxChars = opts?.maxChars ?? 96;
   const cleaned = compressWhitespace(raw.replace(/["“”]/g, '"').trim());
   if (!cleaned) return null;
 
-  const { sanitized } = anonymizeText(cleaned);
+  const { sanitized } = anonymizeText(cleaned, { redactNames: opts?.redactNames ?? false });
   const words = sanitized.split(/\s+/).filter(Boolean);
   const sliced = words.slice(0, maxWords).join(" ");
   const clipped = sliced.length > maxChars ? sliced.slice(0, maxChars - 1).trimEnd() + "…" : sliced;
@@ -994,6 +1007,7 @@ export function createRewindAnalyzer(options?: {
     let conversationHasAgainStill = false;
     let firstWinTurn: number | null = null;
     const conversationEvidenceSnippets = new Set<string>();
+    let openerRecorded = false;
 
     const conversationLifeCandidates = new Map<
       string,
@@ -1014,7 +1028,7 @@ export function createRewindAnalyzer(options?: {
     let travelStrongHits = 0;
 
     const recordConversationEvidence = (raw: string) => {
-      const snippet = makeSafeSnippet(raw, { maxWords: 8, maxChars: 60 });
+      const snippet = makeSnippet(raw, { maxWords: 12, maxChars: 120 });
       if (!snippet) return;
       conversationEvidenceSnippets.add(snippet);
     };
@@ -1039,7 +1053,7 @@ export function createRewindAnalyzer(options?: {
           strongHits: 0,
         };
 
-      const snippet = makeSafeSnippet(input.snippet, { maxWords: 8, maxChars: 72 });
+      const snippet = makeSnippet(input.snippet, { maxWords: 8, maxChars: 72 });
       if (snippet) current.snippets.add(snippet);
       current.messageHits += 1;
       if (input.strong) current.strongHits += 1;
@@ -1148,6 +1162,13 @@ export function createRewindAnalyzer(options?: {
       let messageHasWtf = false;
       let messageHasBroken = false;
 
+      if (!openerRecorded) {
+        const opener = entityText || trimmedFlavor;
+        const snippet = opener ? makeSnippet(opener, { maxWords: 12, maxChars: 120 }) : null;
+        if (snippet && !isBoringSnippet(snippet)) conversationEvidenceSnippets.add(snippet);
+        openerRecorded = true;
+      }
+
       for (const key of Object.keys(INTENT_KEYWORDS) as RewindIntent[]) {
         intentScores[key] += scoreByKeywordPresence(loweredFlavor, INTENT_KEYWORDS[key]);
       }
@@ -1216,11 +1237,11 @@ export function createRewindAnalyzer(options?: {
         const destMatch = extractTravelDestinationMatch(entityText);
         if (destMatch) {
           if (!travelDestination) travelDestination = destMatch.destination;
-          const snippet = makeSafeSnippet(destMatch.snippet, { maxWords: 8, maxChars: 80 });
+          const snippet = makeSnippet(destMatch.snippet, { maxWords: 8, maxChars: 80 });
           if (snippet) travelSnippets.add(snippet);
         } else {
           const cue = TRAVEL_CUE_PATTERN.exec(entityText)?.[0] ?? "trip";
-          const snippet = makeSafeSnippet(cue, { maxWords: 4, maxChars: 40 });
+          const snippet = makeSnippet(cue, { maxWords: 4, maxChars: 40 });
           if (snippet) travelSnippets.add(snippet);
         }
       }
@@ -1252,8 +1273,9 @@ export function createRewindAnalyzer(options?: {
           const match = pat.exec(entityLower);
           if (!match) continue;
           const nounRaw = match[2] ?? match[1] ?? match[0];
-          const noun = nounRaw.toLowerCase();
-          const label = noun.charAt(0).toUpperCase() + noun.slice(1).replace(/\brecipes\b/i, "Recipes");
+          const noun = compressWhitespace(nounRaw.toLowerCase().replace(/[^a-z0-9'\-\s]/g, " "));
+          const limited = noun.split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+          const label = (limited || noun).charAt(0).toUpperCase() + (limited || noun).slice(1).replace(/\brecipes\b/i, "Recipes");
           const strong = /\b(trying|tried|started|starting|learning)\b/i.test(match[0]);
           recordLifeCandidate({ type: "food", labelSafe: label, labelPrivate: label, snippet: match[0], strong });
           break;
@@ -1415,6 +1437,12 @@ export function createRewindAnalyzer(options?: {
 
     totalConversations += 1;
 
+    if (title) {
+      const titleEntityText = stripCodeForEntities(anonymizeText(title, { redactNames: false }).sanitized);
+      const titleSnippet = titleEntityText ? makeSnippet(titleEntityText, { maxWords: 10, maxChars: 110 }) : null;
+      if (titleSnippet && !isBoringSnippet(titleSnippet)) conversationEvidenceSnippets.add(titleSnippet);
+    }
+
     const conversationSorry = conversationHabitCounts.get("sorry") ?? 0;
     const conversationThanks = conversationHabitCounts.get("thank you") ?? 0;
     const conversationPlease = conversationHabitCounts.get("please") ?? 0;
@@ -1513,7 +1541,7 @@ export function createRewindAnalyzer(options?: {
         const match = extractTravelDestinationMatch(titleEntityText);
         if (match) {
           travelDestination = match.destination;
-          const snippet = makeSafeSnippet(match.snippet, { maxWords: 8, maxChars: 80 });
+          const snippet = makeSnippet(match.snippet, { maxWords: 8, maxChars: 80 });
           if (snippet) travelSnippets.add(snippet);
         }
       }
@@ -1896,6 +1924,24 @@ export function createRewindAnalyzer(options?: {
     const projects = (() => {
       const candidates = conversations.filter((c) => c.intent !== "vent");
 
+      const signatureScore = (text: string) => {
+        const trimmed = text.trim();
+        if (!trimmed) return -999;
+        const lower = trimmed.toLowerCase();
+        const tokens = lower.split(/\s+/).filter(Boolean);
+        const significant = tokens.filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+        const hasDigits = /\d/.test(trimmed);
+        const hasCamel = /\b[A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*\b/.test(trimmed);
+        const hasQuote = /["“”]/.test(trimmed);
+        return (
+          significant.length * 6 +
+          Math.min(trimmed.length, 90) / 2 +
+          (hasDigits ? 5 : 0) +
+          (hasCamel ? 6 : 0) +
+          (hasQuote ? 2 : 0)
+        );
+      };
+
       const clusters = new Map<
         string,
         {
@@ -2102,7 +2148,31 @@ export function createRewindAnalyzer(options?: {
             coreStack.length >= 2 ? `${coreStack[0]} → ${coreStack[1]}` : coreStack.length === 1 ? coreStack[0] : null;
 
           const labelSafe = themeTitle(cluster.projectKey);
-          const labelPrivate = stackPair ? `${labelSafe} (${stackPair})` : stackTop ? `${labelSafe} (${stackTop})` : labelSafe;
+          const labelPrivateBase = stackPair
+            ? `${labelSafe} (${stackPair})`
+            : stackTop
+              ? `${labelSafe} (${stackTop})`
+              : labelSafe;
+
+          const signature = (() => {
+            const all = cluster.evidence.flatMap((e) => e.snippets).map((s) => s.trim()).filter(Boolean);
+            const unique = Array.from(new Set(all));
+            const filtered = unique
+              .filter((s) => {
+                const lower = s.toLowerCase();
+                if (lower.length < 10) return false;
+                if (lower === "please" || lower === "thank you" || lower === "thanks" || lower === "sorry") return false;
+                if (lower === "again" || lower === "still" || lower === "wtf") return false;
+                if (lower.includes("[email]") || lower.includes("[phone]") || lower.includes("[card]")) return false;
+                if (stack.some((t) => t.toLowerCase() === lower)) return false;
+                return true;
+              })
+              .sort((a, b) => signatureScore(b) - signatureScore(a));
+            return filtered[0] ?? null;
+          })();
+
+          const signatureShort = signature ? makeSnippet(signature, { maxWords: 7, maxChars: 64 }) : null;
+          const labelPrivate = signatureShort ? `${labelSafe} — ${signatureShort}` : labelPrivateBase;
 
           const whatSafe = whatBuilt(cluster.projectKey, topDeliverable, stackTop);
           const whatPrivate = (() => {
