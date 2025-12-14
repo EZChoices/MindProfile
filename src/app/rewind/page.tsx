@@ -280,6 +280,8 @@ export default function RewindPage() {
   const [includeExamples, setIncludeExamples] = useState(true);
   const [allowRedactedExcerpts, setAllowRedactedExcerpts] = useState(false);
   const [sharePick, setSharePick] = useState(0);
+  const [dismissedHighlights, setDismissedHighlights] = useState<string[]>([]);
+  const [dismissedRabbitHoles, setDismissedRabbitHoles] = useState<string[]>([]);
 
   const [debugEnabled, setDebugEnabled] = useState(false);
 
@@ -301,9 +303,22 @@ export default function RewindPage() {
 
   useEffect(() => {
     setSharePick(0);
-  }, [spice, includeSpicyWords, rewind?.totalConversations]);
+  }, [spice, includeSpicyWords, dismissedHighlights.length, dismissedRabbitHoles.length, rewind?.totalConversations]);
 
-  const bangerPack = rewind ? generateRewindBangers(rewind, { spice, includeSpicyWords }) : null;
+  const dismissedHighlightsSet = new Set(dismissedHighlights);
+  const dismissedRabbitHolesSet = new Set(dismissedRabbitHoles);
+  const rewindForBangers = rewind
+    ? {
+        ...rewind,
+        wrapped: {
+          ...rewind.wrapped,
+          rabbitHoles: rewind.wrapped.rabbitHoles.filter((h) => !dismissedRabbitHolesSet.has(h.key)),
+          lifeHighlights: rewind.wrapped.lifeHighlights.filter((h) => !dismissedHighlightsSet.has(h.key)),
+        },
+      }
+    : null;
+
+  const bangerPack = rewindForBangers ? generateRewindBangers(rewindForBangers, { spice, includeSpicyWords }) : null;
   const shareBangers = bangerPack?.share ?? [];
   const currentShareBanger: RewindBanger | null =
     shareBangers.length > 0 ? shareBangers[sharePick % shareBangers.length] : null;
@@ -324,6 +339,14 @@ export default function RewindPage() {
         )
         .slice(0, 6)
     : [];
+
+  const visibleLifeHighlights = rewind
+    ? rewind.wrapped.lifeHighlights.filter((h) => !dismissedHighlightsSet.has(h.key))
+    : [];
+  const highLifeHighlights = visibleLifeHighlights.filter((h) => h.level === "high");
+  const lowLifeHighlights = visibleLifeHighlights.filter((h) => h.level !== "high");
+
+  const visibleRabbitHoles = rewind ? rewind.wrapped.rabbitHoles.filter((h) => !dismissedRabbitHolesSet.has(h.key)) : [];
 
   const buildShareText = (insight: ShareInsight) =>
     insight.subhead ? `${insight.headline}\n${insight.subhead}` : insight.headline;
@@ -391,6 +414,8 @@ export default function RewindPage() {
     setIncludeSpicyWords(false);
     setIncludeExamples(true);
     setAllowRedactedExcerpts(false);
+    setDismissedHighlights([]);
+    setDismissedRabbitHoles([]);
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -424,6 +449,8 @@ export default function RewindPage() {
 
       const summary = await analyzeRewindFileClient(file, (p) => setClientProgress(p), { since, until });
       setRewind(summary);
+      setDismissedHighlights([]);
+      setDismissedRabbitHoles([]);
 
       try {
         const year = new Date(until.getTime() - 1).getFullYear();
@@ -466,7 +493,15 @@ export default function RewindPage() {
     setIncludeSpicyWords(false);
     setIncludeExamples(true);
     setAllowRedactedExcerpts(false);
+    setDismissedHighlights([]);
+    setDismissedRabbitHoles([]);
   };
+
+  const dismissHighlight = (key: string) =>
+    setDismissedHighlights((prev) => (prev.includes(key) ? prev : [...prev, key]));
+
+  const dismissRabbitHole = (key: string) =>
+    setDismissedRabbitHoles((prev) => (prev.includes(key) ? prev : [...prev, key]));
 
   return (
     <main className="beam gridlines relative overflow-hidden">
@@ -781,26 +816,42 @@ export default function RewindPage() {
               </div>
             </div>
 
-            {includeExamples && rewind.wrapped.lifeHighlights.length > 0 && (
+            {rewind.wrapped.trips.tripCount > 0 && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
-                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Life highlights</div>
-                <p className="muted mt-3 text-sm text-slate-100">Private view. No raw prompts.</p>
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Trips</div>
+                <p className="muted mt-3 text-sm text-slate-100">
+                  You planned {rewind.wrapped.trips.tripCount.toLocaleString()} trips with me.
+                </p>
 
                 <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                  {rewind.wrapped.lifeHighlights.slice(0, 8).map((h, idx) => (
-                    <div
-                      key={`${h.title}-${idx}`}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                    >
+                  {rewind.wrapped.trips.topTrips.map((t) => (
+                    <div key={t.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>
-                          <div className="text-base font-semibold text-white">{h.title}</div>
-                          {h.month && <p className="muted mt-1 text-xs text-slate-200">{h.month}</p>}
+                          <div className="text-base font-semibold text-white">
+                            {includeExamples && allowRedactedExcerpts && t.titlePrivate ? t.titlePrivate : t.title}
+                          </div>
+                          {t.month && <p className="muted mt-1 text-xs text-slate-200">{t.month}</p>}
+                          {t.range && <p className="muted mt-1 text-xs text-slate-200">{t.range}</p>}
                         </div>
                       </div>
-                      <p className="mt-2 text-sm text-slate-100">{h.line}</p>
-                      {allowRedactedExcerpts && h.excerpt && (
-                        <p className="muted mt-2 text-xs text-slate-200">“{h.excerpt}”</p>
+                      <p className="mt-2 text-sm text-slate-100">{t.line}</p>
+                      {includeExamples && allowRedactedExcerpts && t.excerpt && (
+                        <p className="muted mt-2 text-xs text-slate-200">"{t.excerpt}"</p>
+                      )}
+                      {includeExamples && allowRedactedExcerpts && t.evidence.length > 0 && (
+                        <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                            Evidence (private)
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                            {t.evidence.slice(0, 3).map((e, idx) => (
+                              <li key={`${t.key}-ev-${idx}`}>
+                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
                       )}
                     </div>
                   ))}
@@ -808,32 +859,134 @@ export default function RewindPage() {
               </div>
             )}
 
-            {rewind.wrapped.rabbitHoles.length > 0 && (
+            {includeExamples && visibleLifeHighlights.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Life highlights</div>
+                <p className="muted mt-3 text-sm text-slate-100">High confidence only by default. No raw prompts.</p>
+
+                {highLifeHighlights.length > 0 ? (
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                    {highLifeHighlights.slice(0, 8).map((h) => (
+                      <div key={h.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="text-base font-semibold text-white">
+                              {allowRedactedExcerpts && h.titlePrivate ? h.titlePrivate : h.title}
+                            </div>
+                            {h.month && <p className="muted mt-1 text-xs text-slate-200">{h.month}</p>}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => dismissHighlight(h.key)}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/10"
+                          >
+                            Not me
+                          </button>
+                        </div>
+                        <p className="mt-2 text-sm text-slate-100">{h.line}</p>
+                        {allowRedactedExcerpts && h.excerpt && (
+                          <p className="muted mt-2 text-xs text-slate-200">"{h.excerpt}"</p>
+                        )}
+                        {allowRedactedExcerpts && h.evidence.length > 0 && (
+                          <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                            <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                              Evidence (private)
+                            </summary>
+                            <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                              {h.evidence.slice(0, 3).map((e, idx) => (
+                                <li key={`${h.key}-ev-${idx}`}>
+                                  {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-5 text-sm text-slate-100">No high-confidence life highlights found in this window.</p>
+                )}
+
+                {lowLifeHighlights.length > 0 && (
+                  <details className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                      Other things we spotted (low confidence)
+                    </summary>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {lowLifeHighlights.slice(0, 6).map((h) => (
+                        <div key={h.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <div className="text-sm font-semibold text-white">{h.title}</div>
+                              {h.month && <p className="muted mt-1 text-xs text-slate-200">{h.month}</p>}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => dismissHighlight(h.key)}
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/10"
+                            >
+                              Not me
+                            </button>
+                          </div>
+                          <p className="mt-2 text-sm text-slate-100">{h.line}</p>
+                          {allowRedactedExcerpts && h.excerpt && (
+                            <p className="muted mt-2 text-xs text-slate-200">"{h.excerpt}"</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
+              </div>
+            )}
+
+            {visibleRabbitHoles.length > 0 && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Rabbit holes</div>
                 <p className="muted mt-3 text-sm text-slate-100">Short obsessions. High intensity.</p>
 
                 <ul className="mt-5 space-y-4 text-sm text-slate-100">
-                  {rewind.wrapped.rabbitHoles.map((hole) => (
-                    <li
-                      key={`${hole.title}-${hole.range}`}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                    >
+                  {visibleRabbitHoles.map((hole) => (
+                    <li key={hole.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <div className="text-base font-semibold text-white">{hole.title}</div>
                           <p className="muted mt-1 text-xs text-slate-200">{hole.range}</p>
                         </div>
-                        <div className="text-right">
-                          <div className="text-lg font-semibold text-white">{hole.chats.toLocaleString()}</div>
-                          <p className="muted mt-1 text-xs text-slate-200">
-                            chats in {hole.days.toLocaleString()} days
-                          </p>
+                        <div className="flex flex-col items-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => dismissRabbitHole(hole.key)}
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-200 hover:bg-white/10"
+                          >
+                            Not me
+                          </button>
+                          <div className="text-right">
+                            <div className="text-lg font-semibold text-white">{hole.chats.toLocaleString()}</div>
+                            <p className="muted mt-1 text-xs text-slate-200">
+                              chats in {hole.days.toLocaleString()} days
+                            </p>
+                          </div>
                         </div>
                       </div>
                       <p className="mt-2 text-sm text-slate-100">{hole.why}</p>
-                      {allowRedactedExcerpts && hole.excerpt && (
-                        <p className="muted mt-2 text-xs text-slate-200">“{hole.excerpt}”</p>
+                      {includeExamples && allowRedactedExcerpts && hole.excerpt && (
+                        <p className="muted mt-2 text-xs text-slate-200">"{hole.excerpt}"</p>
+                      )}
+                      {includeExamples && allowRedactedExcerpts && hole.evidence.length > 0 && (
+                        <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                            Evidence (private)
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                            {hole.evidence.slice(0, 3).map((e, idx) => (
+                              <li key={`${hole.key}-ev-${idx}`}>
+                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
                       )}
                     </li>
                   ))}
@@ -848,12 +1001,21 @@ export default function RewindPage() {
 
                 <ol className="mt-5 space-y-4 text-sm text-slate-100">
                   {rewind.wrapped.projects.map((project, idx) => (
-                    <li key={`${project.projectLabel}-${idx}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <li key={project.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                         <div>
                           <div className="text-xs uppercase tracking-[0.2em] text-slate-200">#{idx + 1}</div>
-                          <div className="mt-2 text-base font-semibold text-white">{project.projectLabel}</div>
-                          <p className="mt-2 text-sm text-slate-100">{project.whatYouBuilt}</p>
+                          <div className="mt-2 text-base font-semibold text-white">
+                            {includeExamples && allowRedactedExcerpts && project.projectLabelPrivate
+                              ? project.projectLabelPrivate
+                              : project.projectLabel}
+                          </div>
+                          {project.range && <p className="muted mt-1 text-xs text-slate-200">{project.range}</p>}
+                          <p className="mt-2 text-sm text-slate-100">
+                            {includeExamples && allowRedactedExcerpts && project.whatYouBuiltPrivate
+                              ? project.whatYouBuiltPrivate
+                              : project.whatYouBuilt}
+                          </p>
                         </div>
                         <div className="flex flex-wrap gap-2 sm:justify-end">
                           <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-200">
@@ -885,6 +1047,21 @@ export default function RewindPage() {
                           )}
                         </div>
                       )}
+
+                      {includeExamples && allowRedactedExcerpts && project.evidence.length > 0 && (
+                        <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                            Evidence (private)
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                            {project.evidence.slice(0, 3).map((e, idx2) => (
+                              <li key={`${project.key}-ev-${idx2}`}>
+                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                     </li>
                   ))}
                 </ol>
@@ -900,7 +1077,7 @@ export default function RewindPage() {
 
                 <ul className="mt-5 space-y-4 text-sm text-slate-100">
                   {rewind.wrapped.bossFights.map((boss) => (
-                    <li key={`${boss.title}-${boss.example}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <li key={boss.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <div className="text-base font-semibold text-white">{boss.title}</div>
@@ -915,13 +1092,27 @@ export default function RewindPage() {
                           <p className="muted mt-1 text-xs text-slate-200">chats</p>
                         </div>
                       </div>
+                      {includeExamples && allowRedactedExcerpts && boss.evidence.length > 0 && (
+                        <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                            Evidence (private)
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                            {boss.evidence.slice(0, 3).map((e, idx) => (
+                              <li key={`${boss.key}-ev-${idx}`}>
+                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
             )}
 
-            {rewind.wrapped.rabbitHoles.length === 0 && rewind.wrapped.weirdRabbitHole && (
+            {visibleRabbitHoles.length === 0 && rewind.wrapped.weirdRabbitHole && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                   {rewind.wrapped.weirdRabbitHole.title}
@@ -937,7 +1128,7 @@ export default function RewindPage() {
 
                 <ul className="mt-5 space-y-4 text-sm text-slate-100">
                   {rewind.wrapped.bestMoments.map((m) => (
-                    <li key={`${m.title}-${m.month ?? "x"}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <li key={m.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <div className="text-base font-semibold text-white">{m.title}</div>
@@ -945,8 +1136,22 @@ export default function RewindPage() {
                         </div>
                       </div>
                       <p className="mt-2 text-sm text-slate-100">{m.line}</p>
-                      {allowRedactedExcerpts && m.excerpt && (
-                        <p className="muted mt-2 text-xs text-slate-200">{m.excerpt}</p>
+                      {includeExamples && allowRedactedExcerpts && m.excerpt && (
+                        <p className="muted mt-2 text-xs text-slate-200">"{m.excerpt}"</p>
+                      )}
+                      {includeExamples && allowRedactedExcerpts && m.evidence.length > 0 && (
+                        <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                            Evidence (private)
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                            {m.evidence.slice(0, 3).map((e, idx) => (
+                              <li key={`${m.key}-ev-${idx}`}>
+                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
                       )}
                     </li>
                   ))}

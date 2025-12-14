@@ -12,6 +12,13 @@ export interface PhraseInsight {
   count: number;
 }
 
+export interface RewindEvidencePointer {
+  conversationId: string | null;
+  startDay: string | null;
+  endDay: string | null;
+  snippets: string[];
+}
+
 export type RewindIntent =
   | "build"
   | "debug"
@@ -35,12 +42,14 @@ export type RewindDeliverable =
 export type RewindMood = "flow" | "frustrated" | "uncertain" | "excited" | "neutral";
 
 export interface RewindConversationSummary {
+  conversationId: string | null;
   topicKey: string | null;
   themeKey: string | null;
   month: string | null;
   startDay: string | null;
   endDay: string | null;
   oneLineSummary: string;
+  evidenceSnippets: string[];
   userMessages: number;
   avgPromptChars: number;
   maxPromptChars: number;
@@ -61,23 +70,30 @@ export interface RewindConversationSummary {
 }
 
 export interface RewindProjectSummary {
+  key: string;
   projectLabel: string;
+  projectLabelPrivate: string | null;
   whatYouBuilt: string;
+  whatYouBuiltPrivate: string | null;
   stack: string[];
   monthsActive: string[];
+  range: string | null;
   chats: number;
   prompts: number;
   intensity: "light" | "steady" | "obsessive";
   statusGuess: "shipped" | "abandoned" | "recurring" | "unknown";
+  evidence: RewindEvidencePointer[];
 }
 
 export interface RewindBossFight {
+  key: string;
   title: string;
   chats: number;
   peak: string | null;
   during: string | null;
   example: string;
   intensityLine: string;
+  evidence: RewindEvidencePointer[];
 }
 
 export interface RewindWrappedSummary {
@@ -93,6 +109,22 @@ export interface RewindWrappedSummary {
   };
   projects: RewindProjectSummary[];
   bossFights: RewindBossFight[];
+  trips: {
+    tripCount: number;
+    topTrips: Array<{
+      key: string;
+      month: string | null;
+      range: string | null;
+      destination: string | null;
+      title: string;
+      titlePrivate: string | null;
+      line: string;
+      confidence: number;
+      level: "high" | "medium" | "low";
+      excerpt: string | null;
+      evidence: RewindEvidencePointer[];
+    }>;
+  };
   wins: Array<{ title: string; count: number }>;
   comebackMoment: { title: string; detail: string } | null;
   timeline: {
@@ -106,26 +138,34 @@ export interface RewindWrappedSummary {
   };
   weirdRabbitHole: { title: string; detail: string } | null;
   rabbitHoles: Array<{
+    key: string;
     title: string;
     range: string;
     chats: number;
     days: number;
     why: string;
     excerpt: string | null;
+    evidence: RewindEvidencePointer[];
   }>;
   lifeHighlights: Array<{
+    key: string;
     type: string;
     month: string | null;
     title: string;
+    titlePrivate: string | null;
     line: string;
     confidence: number;
+    level: "high" | "medium" | "low";
     excerpt: string | null;
+    evidence: RewindEvidencePointer[];
   }>;
   bestMoments: Array<{
+    key: string;
     title: string;
     month: string | null;
     line: string;
     excerpt: string | null;
+    evidence: RewindEvidencePointer[];
   }>;
   growthUpgrades: Array<{
     title: string;
@@ -461,15 +501,20 @@ const CONSTRAINT_PATTERNS: RegExp[] = [
 ];
 
 const TRAVEL_CUE_PATTERN =
-  /\b(flight|flights|hotel|airbnb|itinerary|visa|passport|trip|travel|vacation|holiday|things to do)\b/i;
+  /\b(flight|flights|hotel|airbnb|itinerary|visa|passport|trip|travel|vacation|holiday|booking|booked|reservation|train|rail|airport|things to do)\b/i;
+
+const TRAVEL_STRONG_PATTERN =
+  /\b(book(?:ed|ing)?|reservation|itinerary|passport|visa|flight|hotel|airbnb|airport|train|tickets?)\b/i;
 
 const TRAVEL_DESTINATION_PATTERNS: RegExp[] = [
-  /\b(?:trip|travel|vacation|holiday|flight|flights)\s+(?:to|in)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
+  /\b(?:trip|travel|vacation|holiday|flight|flights|go(?:ing)?|visit(?:ing)?)\s+(?:to|in)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
   /\b(?:hotel|airbnb|stay|staying)\s+(?:in|at)\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
   /\bthings to do in\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+){0,2})\b/i,
 ];
 
-const extractTravelDestination = (text: string): string | null => {
+type TravelDestinationMatch = { destination: string; snippet: string };
+
+const extractTravelDestinationMatch = (text: string): TravelDestinationMatch | null => {
   for (const pattern of TRAVEL_DESTINATION_PATTERNS) {
     pattern.lastIndex = 0;
     const match = pattern.exec(text);
@@ -478,41 +523,78 @@ const extractTravelDestination = (text: string): string | null => {
     const cleaned = captured.replace(/[^A-Za-z\s'-]/g, "").replace(/\s{2,}/g, " ").trim();
     if (!cleaned) continue;
     if (cleaned.length > 40) continue;
-    return cleaned;
+    return { destination: cleaned, snippet: match?.[0] ?? cleaned };
   }
   return null;
 };
 
-const LIFE_HIGHLIGHT_TOKENS: Array<{ type: string; token: string }> = [
-  { type: "food", token: "baking" },
-  { type: "food", token: "recipe" },
-  { type: "food", token: "cooking" },
-  { type: "fitness", token: "gym" },
-  { type: "fitness", token: "workout" },
-  { type: "fitness", token: "running" },
-  { type: "fitness", token: "yoga" },
-  { type: "hobby", token: "photography" },
-  { type: "hobby", token: "guitar" },
-  { type: "hobby", token: "piano" },
-  { type: "hobby", token: "chess" },
-  { type: "life", token: "moving" },
-  { type: "life", token: "relocation" },
-  { type: "life", token: "apartment" },
-  { type: "life", token: "visa" },
-  { type: "career", token: "resume" },
-  { type: "career", token: "interview" },
-  { type: "career", token: "offer" },
-  { type: "learning", token: "spanish" },
-  { type: "learning", token: "french" },
-  { type: "learning", token: "japanese" },
-  { type: "learning", token: "korean" },
-  { type: "learning", token: "duolingo" },
-  { type: "fun", token: "dolphins" },
+const TRANSLATION_CUE_PATTERN = /\btranslate|translation\b/i;
+
+const LANGUAGE_NAMES = [
+  "spanish",
+  "french",
+  "german",
+  "italian",
+  "portuguese",
+  "russian",
+  "arabic",
+  "hindi",
+  "japanese",
+  "korean",
+  "mandarin",
+  "chinese",
 ];
 
-const LIFE_HIGHLIGHT_TOKEN_INDEX = new Map<string, { type: string }>(
-  LIFE_HIGHLIGHT_TOKENS.map((t) => [t.token, { type: t.type }]),
+const LANGUAGE_LEARN_PATTERN = new RegExp(
+  `\\b(?:learn(?:ing)?|study(?:ing)?|practice(?:d|ing)?|improve|improving)\\s+(?:some\\s+)?(${LANGUAGE_NAMES.join("|")})\\b`,
+  "i",
 );
+
+const LANGUAGE_PRACTICE_PATTERN = new RegExp(
+  `\\b(${LANGUAGE_NAMES.join("|")})\\s+(?:grammar|vocab|vocabulary|conjugation|practice|lesson|course)\\b`,
+  "i",
+);
+
+const FITNESS_EVENT_PATTERNS: RegExp[] = [
+  /\b(started|starting|getting into|training for)\s+(?:the\s+)?(gym|workouts?|running|yoga)\b/i,
+  /\b(gym|workouts?|yoga)\s+(?:routine|plan|schedule)\b/i,
+  /\btraining for\s+(?:a\s+)?(marathon|half marathon)\b/i,
+];
+
+const FITNESS_TECH_EXCLUDE = /\b(running|run)\s+(?:the\s+)?(code|script|program|tests?)\b/i;
+
+const FOOD_EVENT_PATTERNS: RegExp[] = [
+  /\b(trying|tried|started|starting|learning)\s+(?:to\s+)?(baking|cooking)\b/i,
+  /\b(baking|cooking)\s+(?:phase|era)\b/i,
+  /\b(recipe|recipes)\b/i,
+];
+
+const CAREER_EVENT_PATTERNS: RegExp[] = [
+  /\b(resume|cv)\b/i,
+  /\b(job\s+offer|offer\s+letter)\b/i,
+  /\b(interview|interviews)\b/i,
+  /\b(salary|negotiation|promotion)\b/i,
+];
+
+const MOVE_EVENT_PATTERNS: RegExp[] = [
+  /\b(moving|move|relocating|relocation)\b/i,
+  /\b(apartment|lease|rent|mortgage)\b/i,
+];
+
+const PROJECT_EVIDENCE_PATTERNS: RegExp[] = [
+  /\bwebhook\b/i,
+  /\bendpoint\b/i,
+  /\bdashboard\b/i,
+  /\bautomation\b/i,
+  /\bcron\b/i,
+  /\bcsv\b/i,
+  /\bscrap(?:e|ing)\b/i,
+  /\bdeploy(?:ed|ing)?\b/i,
+  /\bvercel\b/i,
+  /\bprisma\b/i,
+  /\bpostgres(?:ql)?\b/i,
+  /\bsqlite\b/i,
+];
 
 const AGAIN_PATTERN = /\bagain\b/gi;
 const STILL_PATTERN = /\bstill\b/gi;
@@ -686,6 +768,58 @@ const recordTokenMatches = (text: string, pattern: RegExp, counts: Map<string, n
 const tokenize = (textLower: string): string[] =>
   textLower.split(/[^a-z0-9'\-]+/).filter(Boolean);
 
+const compressWhitespace = (text: string) => text.replace(/\s+/g, " ").trim();
+
+const stripCodeBlocks = (text: string) =>
+  text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`[^`]*`/g, " ")
+    .replace(/^\s{4,}.*$/gm, " ");
+
+const stripCodeForEntities = (text: string) => {
+  const stripped = stripCodeBlocks(text);
+  const lines = stripped.split(/\r?\n/);
+  const kept = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    const symbolCount = trimmed.replace(/[a-zA-Z0-9\s]/g, "").length;
+    const ratio = symbolCount / Math.max(1, trimmed.length);
+    // Drop lines that are mostly symbols (stack traces, code, configs).
+    if (ratio >= 0.35) return false;
+    return true;
+  });
+  return compressWhitespace(kept.join(" "));
+};
+
+const TECH_CONTEXT_PATTERN =
+  /\b(function|const|let|var|class|import|export|return|async|await|npm|yarn|pnpm|pip|conda|sql|select|insert|update|delete|http|https|api|endpoint|stack trace|traceback|exception|error|prisma|postgres|docker|kubernetes|react|next\.?js|node\.?js|typescript|javascript|python)\b/i;
+
+const looksTechnicalContext = (textLower: string) => TECH_CONTEXT_PATTERN.test(textLower);
+
+const clamp01 = (n: number) => (n < 0 ? 0 : n > 0.99 ? 0.99 : n);
+
+const makeSafeSnippet = (raw: string, opts?: { maxWords?: number; maxChars?: number }): string | null => {
+  const maxWords = opts?.maxWords ?? 8;
+  const maxChars = opts?.maxChars ?? 72;
+  const cleaned = compressWhitespace(raw.replace(/["“”]/g, '"').trim());
+  if (!cleaned) return null;
+
+  const { sanitized } = anonymizeText(cleaned);
+  const words = sanitized.split(/\s+/).filter(Boolean);
+  const sliced = words.slice(0, maxWords).join(" ");
+  const clipped = sliced.length > maxChars ? sliced.slice(0, maxChars - 1).trimEnd() + "…" : sliced;
+  const finalText = compressWhitespace(clipped);
+  return finalText.length ? finalText : null;
+};
+
+const stableHash = (value: string) => {
+  let h = 0;
+  for (let i = 0; i < value.length; i++) {
+    h = (h * 31 + value.charCodeAt(i)) % 2147483647;
+  }
+  return Math.abs(h).toString(16);
+};
+
 const scoreByKeywordPresence = (textLower: string, keywords: string[]) => {
   let score = 0;
   for (const kw of keywords) {
@@ -798,12 +932,36 @@ export function createRewindAnalyzer(options?: {
 
   const lifeHighlightAccumulators = new Map<
     string,
-    { type: string; label: string; chats: number; months: Map<string, number> }
+    {
+      key: string;
+      type: string;
+      labelSafe: string;
+      labelPrivate: string | null;
+      chats: number;
+      messages: number;
+      strong: number;
+      months: Map<string, number>;
+      evidence: Map<string, RewindEvidencePointer>;
+    }
   >();
+
+  const travelConversations: Array<{
+    conversationId: string | null;
+    startDay: string | null;
+    endDay: string | null;
+    month: string | null;
+    destination: string | null;
+    snippets: string[];
+    messageHits: number;
+    strongHits: number;
+  }> = [];
 
   const addConversation = (conversation: unknown) => {
     const convRecord = asRecord(conversation);
     if (!convRecord) return;
+
+    const conversationIdRaw = convRecord.id ?? convRecord.conversation_id ?? asRecord(convRecord.conversation)?.id;
+    const conversationId = typeof conversationIdRaw === "string" && conversationIdRaw.trim().length ? conversationIdRaw.trim() : null;
 
     const titleRaw = convRecord.title;
     const title = typeof titleRaw === "string" ? titleRaw : "";
@@ -835,8 +993,58 @@ export function createRewindAnalyzer(options?: {
     let conversationHasWtf = false;
     let conversationHasAgainStill = false;
     let firstWinTurn: number | null = null;
+    const conversationEvidenceSnippets = new Set<string>();
+
+    const conversationLifeCandidates = new Map<
+      string,
+      {
+        key: string;
+        type: string;
+        labelSafe: string;
+        labelPrivate: string | null;
+        snippets: Set<string>;
+        messageHits: number;
+        strongHits: number;
+      }
+    >();
+
     let travelDestination: string | null = null;
-    const conversationHighlightKeys = new Set<string>();
+    const travelSnippets = new Set<string>();
+    let travelMessageHits = 0;
+    let travelStrongHits = 0;
+
+    const recordConversationEvidence = (raw: string) => {
+      const snippet = makeSafeSnippet(raw, { maxWords: 8, maxChars: 60 });
+      if (!snippet) return;
+      conversationEvidenceSnippets.add(snippet);
+    };
+
+    const recordLifeCandidate = (input: {
+      type: string;
+      labelSafe: string;
+      labelPrivate?: string | null;
+      snippet: string;
+      strong?: boolean;
+    }) => {
+      const normalized = `${input.type}:${input.labelSafe.toLowerCase()}`;
+      const key = `lh:${stableHash(normalized)}`;
+      const current =
+        conversationLifeCandidates.get(key) ?? {
+          key,
+          type: input.type,
+          labelSafe: input.labelSafe,
+          labelPrivate: input.labelPrivate ?? null,
+          snippets: new Set<string>(),
+          messageHits: 0,
+          strongHits: 0,
+        };
+
+      const snippet = makeSafeSnippet(input.snippet, { maxWords: 8, maxChars: 72 });
+      if (snippet) current.snippets.add(snippet);
+      current.messageHits += 1;
+      if (input.strong) current.strongHits += 1;
+      conversationLifeCandidates.set(key, current);
+    };
 
     const intentScores: Record<RewindIntent, number> = {
       build: 0,
@@ -934,6 +1142,9 @@ export function createRewindAnalyzer(options?: {
 
       const lowered = trimmed.toLowerCase();
       const loweredFlavor = trimmedFlavor.toLowerCase();
+      const entityText = stripCodeForEntities(trimmedFlavor);
+      const entityLower = entityText.toLowerCase();
+      const isTechnical = looksTechnicalContext(entityLower) || looksTechnicalContext(loweredFlavor);
       let messageHasWtf = false;
       let messageHasBroken = false;
 
@@ -957,6 +1168,16 @@ export function createRewindAnalyzer(options?: {
         messageWinHits += countMatches(lowered, pat);
       }
       if (messageWinHits > 0) {
+        for (const pat of WIN_PATTERNS) {
+          pat.lastIndex = 0;
+          const match = pat.exec(lowered);
+          if (match?.[0]) {
+            recordConversationEvidence(match[0]);
+            break;
+          }
+        }
+      }
+      if (messageWinHits > 0) {
         conversationWinSignals += messageWinHits;
         winSignalTotal += messageWinHits;
       }
@@ -969,14 +1190,95 @@ export function createRewindAnalyzer(options?: {
         messageIndecisionHits += countMatches(lowered, pat);
       }
       if (messageIndecisionHits > 0) {
+        for (const pat of INDECISION_PATTERNS) {
+          pat.lastIndex = 0;
+          const match = pat.exec(lowered);
+          if (match?.[0]) {
+            recordConversationEvidence(match[0]);
+            break;
+          }
+        }
         conversationIndecisionSignals += messageIndecisionHits;
       }
 
       const hasHedge = HEDGE_PATTERNS.some((p) => p.test(lowered));
       const hasConstraint = CONSTRAINT_PATTERNS.some((p) => p.test(lowered));
 
-      if (!travelDestination && TRAVEL_CUE_PATTERN.test(loweredFlavor)) {
-        travelDestination = extractTravelDestination(trimmedFlavor);
+      for (const pat of PROJECT_EVIDENCE_PATTERNS) {
+        pat.lastIndex = 0;
+        const match = pat.exec(loweredFlavor);
+        if (match?.[0]) recordConversationEvidence(match[0]);
+      }
+
+      if (entityText && TRAVEL_CUE_PATTERN.test(entityText)) {
+        travelMessageHits += 1;
+        if (TRAVEL_STRONG_PATTERN.test(entityText)) travelStrongHits += 1;
+        const destMatch = extractTravelDestinationMatch(entityText);
+        if (destMatch) {
+          if (!travelDestination) travelDestination = destMatch.destination;
+          const snippet = makeSafeSnippet(destMatch.snippet, { maxWords: 8, maxChars: 80 });
+          if (snippet) travelSnippets.add(snippet);
+        } else {
+          const cue = TRAVEL_CUE_PATTERN.exec(entityText)?.[0] ?? "trip";
+          const snippet = makeSafeSnippet(cue, { maxWords: 4, maxChars: 40 });
+          if (snippet) travelSnippets.add(snippet);
+        }
+      }
+
+      if (!isTechnical && entityText) {
+        const languageMatch = LANGUAGE_LEARN_PATTERN.exec(entityLower) ?? LANGUAGE_PRACTICE_PATTERN.exec(entityLower);
+        if (languageMatch?.[1]) {
+          const lang = languageMatch[1].toLowerCase();
+          const label = lang.charAt(0).toUpperCase() + lang.slice(1);
+          recordLifeCandidate({ type: "language", labelSafe: label, labelPrivate: label, snippet: languageMatch[0], strong: true });
+        }
+
+        if (!FITNESS_TECH_EXCLUDE.test(entityLower)) {
+          for (const pat of FITNESS_EVENT_PATTERNS) {
+            pat.lastIndex = 0;
+            const match = pat.exec(entityLower);
+            if (!match) continue;
+            const activityRaw = match[2] ?? match[1] ?? match[0];
+            const activity = activityRaw.toLowerCase();
+            const label = activity.charAt(0).toUpperCase() + activity.slice(1).replace(/\bworkouts\b/i, "Workout");
+            const strong = /\b(started|starting|getting into|training)\b/i.test(match[0]);
+            recordLifeCandidate({ type: "fitness", labelSafe: label, labelPrivate: label, snippet: match[0], strong });
+            break;
+          }
+        }
+
+        for (const pat of FOOD_EVENT_PATTERNS) {
+          pat.lastIndex = 0;
+          const match = pat.exec(entityLower);
+          if (!match) continue;
+          const nounRaw = match[2] ?? match[1] ?? match[0];
+          const noun = nounRaw.toLowerCase();
+          const label = noun.charAt(0).toUpperCase() + noun.slice(1).replace(/\brecipes\b/i, "Recipes");
+          const strong = /\b(trying|tried|started|starting|learning)\b/i.test(match[0]);
+          recordLifeCandidate({ type: "food", labelSafe: label, labelPrivate: label, snippet: match[0], strong });
+          break;
+        }
+
+        for (const pat of CAREER_EVENT_PATTERNS) {
+          pat.lastIndex = 0;
+          const match = pat.exec(entityLower);
+          if (!match) continue;
+          const token = match[0].toLowerCase();
+          const label =
+            token.includes("job offer") ? "Job offer" : token.includes("offer letter") ? "Offer letter" : token.includes("resume") || token.includes("cv") ? "Resume" : token.includes("salary") ? "Salary" : "Interview";
+          recordLifeCandidate({ type: "career", labelSafe: label, labelPrivate: label, snippet: match[0], strong: true });
+          break;
+        }
+
+        for (const pat of MOVE_EVENT_PATTERNS) {
+          pat.lastIndex = 0;
+          const match = pat.exec(entityLower);
+          if (!match) continue;
+          const token = match[0].toLowerCase();
+          const label = token.includes("apartment") ? "Apartment hunt" : token.includes("lease") ? "Lease" : token.includes("mortgage") ? "Mortgage" : "Moving";
+          recordLifeCandidate({ type: "life", labelSafe: label, labelPrivate: label, snippet: match[0], strong: true });
+          break;
+        }
       }
 
       // Topics
@@ -994,6 +1296,16 @@ export function createRewindAnalyzer(options?: {
       for (const habit of HABIT_PHRASES) {
         const hits = countMatches(lowered, habit.pattern);
         if (hits > 0) {
+          if (
+            habit.phrase === "quick question" ||
+            habit.phrase === "real quick" ||
+            habit.phrase === "simple question" ||
+            habit.phrase === "why is this broken" ||
+            habit.phrase === "doesn't work" ||
+            habit.phrase === "wtf"
+          ) {
+            recordConversationEvidence(habit.phrase);
+          }
           habitCounts.set(habit.phrase, (habitCounts.get(habit.phrase) ?? 0) + hits);
           conversationHabitCounts.set(
             habit.phrase,
@@ -1021,10 +1333,16 @@ export function createRewindAnalyzer(options?: {
       }
 
       const messageAgainHits = countMatches(lowered, AGAIN_PATTERN);
-      if (messageAgainHits > 0) againCount += messageAgainHits;
+      if (messageAgainHits > 0) {
+        againCount += messageAgainHits;
+        recordConversationEvidence("again");
+      }
 
       const messageStillHits = countMatches(lowered, STILL_PATTERN);
-      if (messageStillHits > 0) stillCount += messageStillHits;
+      if (messageStillHits > 0) {
+        stillCount += messageStillHits;
+        recordConversationEvidence("still");
+      }
       if (messageAgainHits > 0 || messageStillHits > 0) conversationHasAgainStill = true;
 
       const hasQuestionBurst = QUESTION_BURST_PATTERN.test(trimmed);
@@ -1051,12 +1369,6 @@ export function createRewindAnalyzer(options?: {
 
       // Word frequencies
       const tokens = tokenize(lowered);
-      const flavorTokens = tokenize(loweredFlavor);
-      for (const token of flavorTokens) {
-        const entry = LIFE_HIGHLIGHT_TOKEN_INDEX.get(token);
-        if (!entry) continue;
-        conversationHighlightKeys.add(`${entry.type}:${token}`);
-      }
       for (const token of tokens) {
         if (ANON_TOKENS.has(token)) continue;
         if (token.length < 3) continue;
@@ -1193,28 +1505,67 @@ export function createRewindAnalyzer(options?: {
       }
     }
 
-    const recordLifeHighlight = (type: string, label: string) => {
-      const key = `${type}:${label.toLowerCase()}`;
-      const current =
-        lifeHighlightAccumulators.get(key) ?? {
-          type,
-          label,
-          chats: 0,
-          months: new Map<string, number>(),
-        };
-      current.chats += 1;
-      if (monthKey) current.months.set(monthKey, (current.months.get(monthKey) ?? 0) + 1);
-      lifeHighlightAccumulators.set(key, current);
-    };
+    const evidenceKey = conversationId ?? `noid:${startDay ?? monthKey ?? stableHash(titleSafeLower)}`;
 
-    if (travelDestination) recordLifeHighlight("travel", travelDestination);
-    for (const highlightKey of conversationHighlightKeys) {
-      const idx = highlightKey.indexOf(":");
-      if (idx <= 0) continue;
-      const type = highlightKey.slice(0, idx);
-      const token = highlightKey.slice(idx + 1);
-      if (!token) continue;
-      recordLifeHighlight(type, token);
+    if (!travelDestination && title) {
+      const titleEntityText = stripCodeForEntities(anonymizeText(title, { redactNames: false }).sanitized);
+      if (titleEntityText && TRAVEL_CUE_PATTERN.test(titleEntityText)) {
+        const match = extractTravelDestinationMatch(titleEntityText);
+        if (match) {
+          travelDestination = match.destination;
+          const snippet = makeSafeSnippet(match.snippet, { maxWords: 8, maxChars: 80 });
+          if (snippet) travelSnippets.add(snippet);
+        }
+      }
+    }
+
+    if (travelMessageHits > 0) {
+      travelConversations.push({
+        conversationId,
+        startDay,
+        endDay,
+        month: monthKey,
+        destination: travelDestination,
+        snippets: Array.from(travelSnippets).slice(0, 3),
+        messageHits: travelMessageHits,
+        strongHits: travelStrongHits,
+      });
+    }
+
+    for (const candidate of conversationLifeCandidates.values()) {
+      const current =
+        lifeHighlightAccumulators.get(candidate.key) ?? {
+          key: candidate.key,
+          type: candidate.type,
+          labelSafe: candidate.labelSafe,
+          labelPrivate: candidate.labelPrivate,
+          chats: 0,
+          messages: 0,
+          strong: 0,
+          months: new Map<string, number>(),
+          evidence: new Map<string, RewindEvidencePointer>(),
+        };
+
+      current.chats += 1;
+      current.messages += candidate.messageHits;
+      current.strong += candidate.strongHits;
+      if (monthKey) current.months.set(monthKey, (current.months.get(monthKey) ?? 0) + 1);
+      if (!current.labelPrivate && candidate.labelPrivate) current.labelPrivate = candidate.labelPrivate;
+
+      const existingEvidence = current.evidence.get(evidenceKey);
+      if (existingEvidence) {
+        candidate.snippets.forEach((s) => existingEvidence.snippets.push(s));
+        existingEvidence.snippets = Array.from(new Set(existingEvidence.snippets)).slice(0, 3);
+      } else {
+        current.evidence.set(evidenceKey, {
+          conversationId,
+          startDay,
+          endDay,
+          snippets: Array.from(candidate.snippets).slice(0, 3),
+        });
+      }
+
+      lifeHighlightAccumulators.set(candidate.key, current);
     }
 
     const durationMins =
@@ -1294,12 +1645,14 @@ export function createRewindAnalyzer(options?: {
     })();
 
     conversations.push({
+      conversationId,
       topicKey,
       themeKey,
       month: monthKey,
       startDay,
       endDay,
       oneLineSummary,
+      evidenceSnippets: Array.from(conversationEvidenceSnippets).slice(0, 10),
       userMessages: conversationUserMessageCount,
       avgPromptChars: avgPrompt,
       maxPromptChars: conversationMaxPromptChars,
@@ -1547,6 +1900,7 @@ export function createRewindAnalyzer(options?: {
         string,
         {
           projectKey: string;
+          clusterKey: string;
           chats: number;
           prompts: number;
           months: Set<string>;
@@ -1554,16 +1908,19 @@ export function createRewindAnalyzer(options?: {
           deliverableCounts: Map<RewindDeliverable, number>;
           wins: number;
           friction: number;
+          evidence: RewindEvidencePointer[];
         }
       >();
 
       for (const conv of candidates) {
         const projectKey = conv.themeKey ?? conv.topicKey ?? (conv.intent === "debug" ? "debug" : conv.intent);
-        const clusterKey = projectKey;
+        const stackHint = conv.stack.find((t) => !["Git", "GitHub", "Windows", "Linux", "macOS", "VS Code"].includes(t)) ?? "general";
+        const clusterKey = `${projectKey}:${stackHint}`;
 
         const current =
           clusters.get(clusterKey) ?? {
             projectKey,
+            clusterKey,
             chats: 0,
             prompts: 0,
             months: new Set<string>(),
@@ -1571,6 +1928,7 @@ export function createRewindAnalyzer(options?: {
             deliverableCounts: new Map<RewindDeliverable, number>(),
             wins: 0,
             friction: 0,
+            evidence: [],
           };
 
         current.chats += 1;
@@ -1585,6 +1943,19 @@ export function createRewindAnalyzer(options?: {
           conv.deliverable,
           (current.deliverableCounts.get(conv.deliverable) ?? 0) + 1,
         );
+
+        const projectSnippets = conv.evidenceSnippets.filter(
+          (s) => !["please", "thank you", "thanks", "sorry", "again", "still", "maybe"].includes(s.toLowerCase()),
+        );
+        const snippets = (projectSnippets.length > 0 ? projectSnippets : conv.evidenceSnippets).slice(0, 3);
+        if (snippets.length > 0) {
+          current.evidence.push({
+            conversationId: conv.conversationId,
+            startDay: conv.startDay,
+            endDay: conv.endDay,
+            snippets,
+          });
+        }
         clusters.set(clusterKey, current);
       }
 
@@ -1726,17 +2097,59 @@ export function createRewindAnalyzer(options?: {
                   ? "abandoned"
                   : "unknown";
 
-          const label = stackTop ? `${themeTitle(cluster.projectKey)} (${stackTop})` : themeTitle(cluster.projectKey);
+          const coreStack = stack.filter((t) => !["Git", "GitHub", "Windows", "Linux", "macOS", "VS Code"].includes(t));
+          const stackPair =
+            coreStack.length >= 2 ? `${coreStack[0]} → ${coreStack[1]}` : coreStack.length === 1 ? coreStack[0] : null;
+
+          const labelSafe = themeTitle(cluster.projectKey);
+          const labelPrivate = stackPair ? `${labelSafe} (${stackPair})` : stackTop ? `${labelSafe} (${stackTop})` : labelSafe;
+
+          const whatSafe = whatBuilt(cluster.projectKey, topDeliverable, stackTop);
+          const whatPrivate = (() => {
+            if (!stackPair) return whatSafe;
+            if (cluster.projectKey === "automation") return `An automation to connect ${stackPair}.`;
+            if (cluster.projectKey === "api") return `An integration to connect ${stackPair}.`;
+            if (cluster.projectKey === "dashboard") return `A dashboard for ${stackPair}.`;
+            if (cluster.projectKey === "data") return `A data pipeline around ${stackPair}.`;
+            if (cluster.projectKey === "deploy") return `A deploy setup to ship ${stackPair}.`;
+            return whatSafe;
+          })();
+
+          const monthsSorted = Array.from(cluster.months).sort();
+          const range =
+            monthsSorted.length >= 2
+              ? `${monthLabel(monthsSorted[0])} → ${monthLabel(monthsSorted[monthsSorted.length - 1])}`
+              : monthsSorted.length === 1
+                ? monthLabel(monthsSorted[0])
+                : null;
+
+          const evidence = (() => {
+            const seen = new Set<string>();
+            const picked: RewindEvidencePointer[] = [];
+            for (const e of cluster.evidence) {
+              const k = e.conversationId ?? e.startDay ?? stableHash(e.snippets.join("|"));
+              if (seen.has(k)) continue;
+              seen.add(k);
+              picked.push({ ...e, snippets: e.snippets.slice(0, 3) });
+              if (picked.length >= 8) break;
+            }
+            return picked;
+          })();
 
           return {
-            projectLabel: label,
-            whatYouBuilt: whatBuilt(cluster.projectKey, topDeliverable, stackTop),
+            key: `proj:${stableHash(cluster.clusterKey)}`,
+            projectLabel: labelSafe,
+            projectLabelPrivate: labelPrivate,
+            whatYouBuilt: whatSafe,
+            whatYouBuiltPrivate: whatPrivate,
             stack,
             monthsActive,
+            range,
             chats: cluster.chats,
             prompts: cluster.prompts,
             intensity,
             statusGuess,
+            evidence,
           };
         });
 
@@ -1785,6 +2198,7 @@ export function createRewindAnalyzer(options?: {
       const buildFight = (fight: {
         title: string;
         example: string;
+        snippetPattern: RegExp;
         predicate: (c: RewindConversationSummary) => boolean;
       }): RewindBossFight | null => {
         const matches = conversations.filter(fight.predicate);
@@ -1793,13 +2207,29 @@ export function createRewindAnalyzer(options?: {
         const during = duringFor(matches);
         const intensityLine =
           peak ? `in ${matches.length.toLocaleString()} chats · peaked ${peak}` : `in ${matches.length.toLocaleString()} chats`;
+        const evidence = matches
+          .map((c) => {
+            const snippets = c.evidenceSnippets.filter((s) => fight.snippetPattern.test(s)).slice(0, 3);
+            if (snippets.length === 0) return null;
+            return {
+              conversationId: c.conversationId,
+              startDay: c.startDay,
+              endDay: c.endDay,
+              snippets,
+            };
+          })
+          .filter((e): e is RewindEvidencePointer => Boolean(e))
+          .slice(0, 8);
+        if (evidence.length === 0) return null;
         return {
+          key: `bf:${stableHash(fight.title)}`,
           title: fight.title,
           chats: matches.length,
           peak,
           during,
           example: fight.example,
           intensityLine,
+          evidence,
         };
       };
 
@@ -1807,21 +2237,25 @@ export function createRewindAnalyzer(options?: {
         buildFight({
           title: "The “doesn't work” era",
           example: "\"doesn't work\"",
+          snippetPattern: /\b(why is this broken|doesn'?t work|not working|isn'?t working)\b/i,
           predicate: (c) => c.hasBroken,
         }),
         buildFight({
           title: "Again. Still. Again.",
           example: "\"again\" / \"still\"",
+          snippetPattern: /\b(again|still)\b/i,
           predicate: (c) => c.hasAgainStill,
         }),
         buildFight({
           title: "WTF moments",
           example: "\"wtf\"",
+          snippetPattern: /\bwtf\b/i,
           predicate: (c) => c.hasWtf,
         }),
         buildFight({
           title: "Decision paralysis",
           example: "\"should i\"",
+          snippetPattern: /\b(should i|help me decide|can'?t decide|cannot decide|not sure|unsure|maybe)\b/i,
           predicate: (c) => c.indecisionSignals > 0,
         }),
       ];
@@ -2002,130 +2436,272 @@ export function createRewindAnalyzer(options?: {
               ? "It ate a whole week."
               : "A brief obsession.";
         return {
+          key: `rh:${stableHash(hole.key)}`,
           title: hole.key,
           range,
           chats: burst.chats,
           days: burst.days,
           why,
           excerpt: null,
+          evidence: conversations
+            .filter((c) => c.startDay && c.endDay && c.stack.includes(hole.key))
+            .filter((c) => {
+              if (!c.startDay) return false;
+              const ms = dayKeyUtcMs(c.startDay);
+              const start = dayKeyUtcMs(burst.startKey);
+              const end = dayKeyUtcMs(burst.endKey);
+              if (ms == null || start == null || end == null) return true;
+              return ms >= start && ms <= end;
+            })
+            .slice(0, 8)
+            .map((c) => ({
+              conversationId: c.conversationId,
+              startDay: c.startDay,
+              endDay: c.endDay,
+              snippets: [hole.key],
+            })),
         };
       });
     })();
 
-    const lifeHighlights = (() => {
-      const titleCase = (value: string) =>
-        value
-          .split(/\s+/)
-          .filter(Boolean)
-          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-          .join(" ");
+    const trips = (() => {
+      if (travelConversations.length === 0) return { tripCount: 0, topTrips: [] };
 
+      const formatRange = (start: string | null, end: string | null) => {
+        if (!start) return null;
+        if (!end || end === start) return monthLabel(start.slice(0, 7)) + ` ${start.slice(-2)}`;
+        const startDate = parseDayKeyLocal(start);
+        const endDate = parseDayKeyLocal(end);
+        if (!startDate || !endDate) return `${start} → ${end}`;
+        const startMonth = (monthNames[startDate.getMonth()] ?? "").slice(0, 3);
+        const endMonth = (monthNames[endDate.getMonth()] ?? "").slice(0, 3);
+        if (startDate.getFullYear() === endDate.getFullYear() && startDate.getMonth() === endDate.getMonth()) {
+          return `${startMonth} ${startDate.getDate()}-${endDate.getDate()}`;
+        }
+        return `${startMonth} ${startDate.getDate()}-${endMonth} ${endDate.getDate()}`;
+      };
+
+      const byDestination = new Map<string, typeof travelConversations>();
+      for (const conv of travelConversations) {
+        if (!conv.destination) continue;
+        const key = conv.destination.toLowerCase();
+        const current = byDestination.get(key) ?? [];
+        current.push(conv);
+        byDestination.set(key, current);
+      }
+
+      const clusters: RewindWrappedSummary["trips"]["topTrips"] = [];
+      for (const [destKey, convs] of byDestination.entries()) {
+        const sorted = [...convs].sort((a, b) => (dayKeyUtcMs(a.startDay ?? "") ?? 0) - (dayKeyUtcMs(b.startDay ?? "") ?? 0));
+        let current: typeof sorted = [];
+        let lastMs: number | null = null;
+
+        const flush = () => {
+          if (current.length === 0) return;
+          const destination = current[0]?.destination ?? destKey;
+          const chats = current.length;
+          const messageHits = current.reduce((sum, c) => sum + c.messageHits, 0);
+          const strongHits = current.reduce((sum, c) => sum + c.strongHits, 0);
+          if (chats < 2 && messageHits < 3) {
+            current = [];
+            lastMs = null;
+            return;
+          }
+
+          const start = current.map((c) => c.startDay).filter(Boolean).sort()[0] ?? null;
+          const end = current.map((c) => c.endDay ?? c.startDay).filter(Boolean).sort().slice(-1)[0] ?? start;
+          const peakMonth =
+            current
+              .map((c) => c.month)
+              .filter((m): m is string => typeof m === "string")
+              .sort()[0] ?? null;
+
+          let confidence = 0.25;
+          if (chats >= 2) confidence += 0.4;
+          if (messageHits >= 3) confidence += 0.2;
+          if (strongHits >= 2) confidence += 0.2;
+          confidence = clamp01(confidence);
+          let level: "high" | "medium" | "low" = confidence >= 0.75 ? "high" : confidence >= 0.6 ? "medium" : "low";
+          if (level === "high" && strongHits === 0) level = "medium";
+
+          const evidence = current
+            .slice(0, 10)
+            .map((c) => ({
+              conversationId: c.conversationId,
+              startDay: c.startDay,
+              endDay: c.endDay,
+              snippets: c.snippets.slice(0, 3),
+            }));
+
+          const key = `trip:${stableHash(destKey)}:${stableHash(String(start ?? ""))}`;
+
+          clusters.push({
+            key,
+            month: peakMonth ? monthLabel(peakMonth) : null,
+            range: formatRange(start, end),
+            destination,
+            title: "Trip planning",
+            titlePrivate: destination ? `Trip planning: ${destination}` : null,
+            line: "Flights. Stays. And \"what should we do\" energy.",
+            confidence,
+            level,
+            excerpt: destination ? destination : null,
+            evidence,
+          });
+
+          current = [];
+          lastMs = null;
+        };
+
+        for (const conv of sorted) {
+          const ms = conv.startDay ? dayKeyUtcMs(conv.startDay) : null;
+          if (ms == null) continue;
+          if (lastMs != null && ms - lastMs > 30 * 24 * 60 * 60 * 1000) {
+            flush();
+          }
+          current.push(conv);
+          lastMs = ms;
+        }
+        flush();
+      }
+
+      clusters.sort((a, b) => b.evidence.length - a.evidence.length || (b.confidence - a.confidence));
+      const high = clusters.filter((t) => t.level === "high");
+      return { tripCount: high.length, topTrips: high.slice(0, 3) };
+    })();
+
+    const lifeHighlights = (() => {
       const peakMonthLabel = (months: Map<string, number>): string | null => {
         const best = Array.from(months.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
         return best ? monthLabel(best) : null;
       };
 
-      const candidates = Array.from(lifeHighlightAccumulators.values())
-        .filter((c) => c.chats >= 2 || c.type === "travel")
-        .sort((a, b) => b.chats - a.chats);
+      const titleFor = (type: string, label: string) => {
+        switch (type) {
+          case "language":
+            return `Learning ${label}`;
+          case "career":
+            return `${label} season`;
+          case "fitness":
+            return `${label} era`;
+          case "food":
+            return `${label} phase`;
+          case "life":
+            return label;
+          default:
+            return label;
+        }
+      };
 
-      const picked: RewindWrappedSummary["lifeHighlights"] = [];
-      const perType = new Map<string, number>();
+      const lineFor = (type: string) => {
+        switch (type) {
+          case "language":
+            return "Not just vibes. Actual practice.";
+          case "career":
+            return "You brought real-life moves here. Respect.";
+          case "fitness":
+            return "You tried to be that person. For real.";
+          case "food":
+            return "A whole phase. We saw it.";
+          case "life":
+            return "Real-life logistics made an appearance.";
+          default:
+            return "It came up enough to count.";
+        }
+      };
 
-      const push = (c: { type: string; label: string; chats: number; months: Map<string, number> }) => {
-        const count = perType.get(c.type) ?? 0;
-        if (count >= 2) return;
-        perType.set(c.type, count + 1);
+      const candidates = Array.from(lifeHighlightAccumulators.values()).filter((c) => c.chats >= 2 || c.messages >= 3);
+
+      const out: RewindWrappedSummary["lifeHighlights"] = [];
+      for (const c of candidates) {
+        let confidence = 0.15;
+        if (c.chats >= 2) confidence += 0.35;
+        if (c.messages >= 3) confidence += 0.2;
+        if (c.strong >= 1) confidence += 0.15;
+        if (c.strong >= 3) confidence += 0.1;
+        if (c.chats >= 4) confidence += 0.1;
+        confidence = clamp01(confidence);
+        let level: "high" | "medium" | "low" = confidence >= 0.75 ? "high" : confidence >= 0.6 ? "medium" : "low";
+        if (level === "high" && c.strong === 0) level = "medium";
 
         const month = peakMonthLabel(c.months);
-        const confidence = Math.min(0.98, 0.45 + c.chats / 10);
+        const evidence = Array.from(c.evidence.values())
+          .sort((a, b) => (dayKeyUtcMs(a.startDay ?? "") ?? 0) - (dayKeyUtcMs(b.startDay ?? "") ?? 0))
+          .slice(0, 8);
+        const excerpt = evidence.flatMap((e) => e.snippets).filter(Boolean)[0] ?? null;
 
-        const title =
-          c.type === "travel"
-            ? `Trip planning: ${c.label}`
-            : c.type === "career"
-              ? `${titleCase(c.label)} season`
-              : c.type === "learning"
-                ? `Learning: ${titleCase(c.label)}`
-                : c.type === "fitness"
-                  ? `${titleCase(c.label)} era`
-                  : c.type === "food"
-                    ? `${titleCase(c.label)} phase`
-                    : c.type === "hobby" || c.type === "fun"
-                      ? `${titleCase(c.label)} cameo`
-                      : `${titleCase(c.label)} moment`;
-
-        const line =
-          c.type === "travel"
-            ? "You mapped it out before you went."
-            : c.type === "career"
-              ? "You brought real life decisions here. Respect."
-              : c.type === "learning"
-                ? "You kept trying until it stuck."
-                : c.type === "fitness"
-                  ? "You tried to be that person. For real."
-                  : c.type === "food"
-                    ? "A whole phase. We saw it."
-                    : c.type === "hobby" || c.type === "fun"
-                      ? "A random obsession that fully counted."
-                      : "It came up enough to be a thing.";
-
-        picked.push({
+        out.push({
+          key: c.key,
           type: c.type,
           month,
-          title,
-          line,
+          title: titleFor(c.type, c.labelSafe),
+          titlePrivate: c.labelPrivate ? titleFor(c.type, c.labelPrivate) : null,
+          line: lineFor(c.type),
           confidence,
-          excerpt: c.type === "travel" ? c.label : c.label,
+          level,
+          excerpt,
+          evidence,
         });
-      };
-
-      for (const c of candidates) {
-        if (picked.length >= 8) break;
-        push(c);
       }
 
-      const fillFromTopics = () => {
-        const topic = topTopics.find((t) => t.key !== "coding") ?? topTopics[0];
-        if (!topic) return;
-        picked.push({
-          type: "theme",
-          month: busiestMonthKey ? monthLabel(busiestMonthKey) : null,
-          title: `${topic.emoji} ${topic.label}`,
-          line: "Not a one-off. A recurring theme.",
-          confidence: 0.5,
-          excerpt: null,
-        });
-      };
+      out.sort((a, b) => {
+        const levelScore = (x: typeof a) => (x.level === "high" ? 3 : x.level === "medium" ? 2 : 1);
+        return levelScore(b) - levelScore(a) || b.confidence - a.confidence;
+      });
 
-      while (picked.length < 5) fillFromTopics();
-      return picked.slice(0, 8);
+      return out.slice(0, 10);
     })();
 
     const bestMoments = (() => {
       const pickMonth = (m: string | null) => (m ? monthLabel(m) : null);
+      const evidenceFor = (conv: RewindConversationSummary | null, snippetsPreferred: string[]): RewindEvidencePointer[] => {
+        if (!conv) return [];
+        const base = snippetsPreferred.length > 0 ? snippetsPreferred : conv.evidenceSnippets;
+        const snippets = Array.from(new Set(base.filter(Boolean))).slice(0, 3);
+        if (snippets.length === 0) return [];
+        return [
+          {
+            conversationId: conv.conversationId,
+            startDay: conv.startDay,
+            endDay: conv.endDay,
+            snippets,
+          },
+        ];
+      };
 
       const funniest = (() => {
         const candidate = conversations
           .filter((c) => c.hasQuickIntro)
           .sort((a, b) => b.userMessages - a.userMessages)[0];
         if (!candidate) return null;
+        const phrase =
+          candidate.evidenceSnippets.find((s) => /quick question|real quick|simple question/i.test(s)) ?? null;
+        if (!phrase) return null;
+        const evidence = evidenceFor(candidate, [phrase]);
+        if (evidence.length === 0) return null;
         return {
+          key: `moment:${stableHash("quick")}:${stableHash(candidate.conversationId ?? candidate.startDay ?? "")}`,
           title: "The “quick question” lie",
           month: pickMonth(candidate.month),
-          line: `You said “quick question”. It turned into ${candidate.userMessages.toLocaleString()} prompts.`,
-          excerpt: "\"quick question\"",
+          line: `You said “${phrase}”. It turned into ${candidate.userMessages.toLocaleString()} prompts.`,
+          excerpt: phrase,
+          evidence,
         };
       })();
 
       const intense = (() => {
         const candidate = [...conversations].sort((a, b) => b.maxPromptChars - a.maxPromptChars)[0];
         if (!candidate || candidate.maxPromptChars <= 0) return null;
+        if (candidate.evidenceSnippets.length === 0) return null;
+        const evidence = evidenceFor(candidate, candidate.evidenceSnippets.slice(0, 1));
+        if (evidence.length === 0) return null;
         return {
+          key: `moment:${stableHash("intense")}:${stableHash(candidate.conversationId ?? candidate.startDay ?? "")}`,
           title: "Most intense moment",
           month: pickMonth(candidate.month),
           line: `One prompt hit ${candidate.maxPromptChars.toLocaleString()} characters. You meant business.`,
           excerpt: null,
+          evidence,
         };
       })();
 
@@ -2134,11 +2710,18 @@ export function createRewindAnalyzer(options?: {
           .filter((c) => c.comeback)
           .sort((a, b) => b.winSignals - a.winSignals)[0];
         if (!candidate) return null;
+        const winSnippets = candidate.evidenceSnippets.filter((s) =>
+          /\b(it worked|it works|solved|fixed|perfect|nailed it|done|thanks?)\b/i.test(s),
+        );
+        const evidence = evidenceFor(candidate, winSnippets);
+        if (evidence.length === 0) return null;
         return {
+          key: `moment:${stableHash("win")}:${stableHash(candidate.conversationId ?? candidate.startDay ?? "")}`,
           title: "Biggest win",
           month: pickMonth(candidate.month),
           line: "Stuck → solved. You pulled it off.",
           excerpt: null,
+          evidence,
         };
       })();
 
@@ -2147,22 +2730,36 @@ export function createRewindAnalyzer(options?: {
           .filter((c) => c.mood === "frustrated" && c.winSignals === 0)
           .sort((a, b) => b.frictionSignals - a.frictionSignals)[0];
         if (!candidate) return null;
+        const brokenSnippets = candidate.evidenceSnippets.filter((s) =>
+          /\b(why is this broken|doesn'?t work|not working|isn'?t working)\b/i.test(s),
+        );
+        const evidence = evidenceFor(candidate, brokenSnippets);
+        if (evidence.length === 0) return null;
         return {
+          key: `moment:${stableHash("facepalm")}:${stableHash(candidate.conversationId ?? candidate.startDay ?? "")}`,
           title: "Biggest facepalm",
           month: pickMonth(candidate.month),
           line: "You tried everything. The universe said no.",
-          excerpt: candidate.hasBroken ? "\"doesn't work\"" : null,
+          excerpt: brokenSnippets[0] ?? null,
+          evidence,
         };
       })();
 
       const wholesome = (() => {
         const candidate = conversations.filter((c) => c.mood === "flow").sort((a, b) => b.winSignals - a.winSignals)[0];
         if (!candidate) return null;
+        const winSnippets = candidate.evidenceSnippets.filter((s) =>
+          /\b(it worked|it works|solved|fixed|perfect|nailed it|done|thanks?)\b/i.test(s),
+        );
+        const evidence = evidenceFor(candidate, winSnippets);
+        if (evidence.length === 0) return null;
         return {
+          key: `moment:${stableHash("wholesome")}:${stableHash(candidate.conversationId ?? candidate.startDay ?? "")}`,
           title: "Most wholesome streak",
           month: pickMonth(candidate.month),
           line: "Low chaos. High momentum. More of that.",
           excerpt: null,
+          evidence,
         };
       })();
 
@@ -2379,6 +2976,7 @@ export function createRewindAnalyzer(options?: {
       hook,
       projects,
       bossFights,
+      trips,
       wins,
       comebackMoment,
       timeline,

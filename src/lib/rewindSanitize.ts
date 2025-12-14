@@ -1,26 +1,43 @@
 import type { RewindSummary } from "./rewind";
 
 export const sanitizeRewindForStorage = (rewind: RewindSummary): RewindSummary => {
-  const safeHighlights = rewind.wrapped.lifeHighlights.map((h) => {
-    if (h.type === "travel") {
-      return {
-        ...h,
-        title: "Trip planning",
-        line: "You planned a trip like it mattered.",
-        excerpt: null,
-      };
-    }
-    return { ...h, excerpt: null };
-  });
-
   return {
     ...rewind,
+    conversations: rewind.conversations.map((c) => ({
+      ...c,
+      conversationId: null,
+      evidenceSnippets: [],
+    })),
     wrapped: {
       ...rewind.wrapped,
-      lifeHighlights: safeHighlights,
-      rabbitHoles: rewind.wrapped.rabbitHoles.map((h) => ({ ...h, excerpt: null })),
-      bestMoments: rewind.wrapped.bestMoments.map((m) => ({ ...m, excerpt: null })),
+      projects: rewind.wrapped.projects.map((p) => ({
+        ...p,
+        projectLabelPrivate: null,
+        whatYouBuiltPrivate: null,
+        evidence: [],
+      })),
+      bossFights: rewind.wrapped.bossFights.map((b) => ({
+        ...b,
+        evidence: [],
+      })),
+      trips: {
+        tripCount: rewind.wrapped.trips.tripCount,
+        topTrips: rewind.wrapped.trips.topTrips.map((t) => ({
+          ...t,
+          destination: null,
+          titlePrivate: null,
+          excerpt: null,
+          evidence: [],
+        })),
+      },
+      rabbitHoles: rewind.wrapped.rabbitHoles.map((h) => ({ ...h, excerpt: null, evidence: [] })),
+      lifeHighlights: rewind.wrapped.lifeHighlights.map((h) => ({
+        ...h,
+        titlePrivate: null,
+        excerpt: null,
+        evidence: [],
+      })),
+      bestMoments: rewind.wrapped.bestMoments.map((m) => ({ ...m, excerpt: null, evidence: [] })),
     },
   };
 };
-

@@ -17,6 +17,19 @@ const isNullableString = (value: unknown): value is string | null =>
 const isNullableNumber = (value: unknown): value is number | null =>
   value === null || isFiniteNumber(value);
 
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((v: unknown) => typeof v === "string");
+
+const isEvidencePointer = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  return (
+    isNullableString(value.conversationId) &&
+    isNullableString(value.startDay) &&
+    isNullableString(value.endDay) &&
+    isStringArray(value.snippets)
+  );
+};
+
 const isCoverage = (value: unknown) => {
   if (!isRecord(value)) return false;
   return typeof value.sinceMonth === "string" && typeof value.untilMonth === "string" && typeof value.timezone === "string";
@@ -69,12 +82,14 @@ const isBehavior = (value: unknown) => {
 const isConversationSummary = (value: unknown) => {
   if (!isRecord(value)) return false;
   return (
+    isNullableString(value.conversationId) &&
     isNullableString(value.topicKey) &&
     isNullableString(value.themeKey) &&
     isNullableString(value.month) &&
     isNullableString(value.startDay) &&
     isNullableString(value.endDay) &&
     typeof value.oneLineSummary === "string" &&
+    isStringArray(value.evidenceSnippets) &&
     isFiniteNumber(value.userMessages) &&
     isFiniteNumber(value.avgPromptChars) &&
     isFiniteNumber(value.maxPromptChars) &&
@@ -100,62 +115,82 @@ const isConversationSummary = (value: unknown) => {
 const isProjectSummary = (value: unknown) => {
   if (!isRecord(value)) return false;
   return (
+    typeof value.key === "string" &&
     typeof value.projectLabel === "string" &&
+    isNullableString(value.projectLabelPrivate) &&
     typeof value.whatYouBuilt === "string" &&
+    isNullableString(value.whatYouBuiltPrivate) &&
     Array.isArray(value.stack) &&
     value.stack.every((t: unknown) => typeof t === "string") &&
     Array.isArray(value.monthsActive) &&
     value.monthsActive.every((t: unknown) => typeof t === "string") &&
+    isNullableString(value.range) &&
     isFiniteNumber(value.chats) &&
     isFiniteNumber(value.prompts) &&
     typeof value.intensity === "string" &&
-    typeof value.statusGuess === "string"
+    typeof value.statusGuess === "string" &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every(isEvidencePointer)
   );
 };
 
 const isBossFight = (value: unknown) => {
   if (!isRecord(value)) return false;
   return (
+    typeof value.key === "string" &&
     typeof value.title === "string" &&
     isFiniteNumber(value.chats) &&
     isNullableString(value.peak) &&
     isNullableString(value.during) &&
     typeof value.example === "string" &&
-    typeof value.intensityLine === "string"
+    typeof value.intensityLine === "string" &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every(isEvidencePointer)
   );
 };
 
 const isRabbitHole = (value: unknown) => {
   if (!isRecord(value)) return false;
   return (
+    typeof value.key === "string" &&
     typeof value.title === "string" &&
     typeof value.range === "string" &&
     isFiniteNumber(value.chats) &&
     isFiniteNumber(value.days) &&
     typeof value.why === "string" &&
-    isNullableString(value.excerpt)
+    isNullableString(value.excerpt) &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every(isEvidencePointer)
   );
 };
 
 const isLifeHighlight = (value: unknown) => {
   if (!isRecord(value)) return false;
   return (
+    typeof value.key === "string" &&
     typeof value.type === "string" &&
     isNullableString(value.month) &&
     typeof value.title === "string" &&
+    isNullableString(value.titlePrivate) &&
     typeof value.line === "string" &&
     isFiniteNumber(value.confidence) &&
-    isNullableString(value.excerpt)
+    typeof value.level === "string" &&
+    isNullableString(value.excerpt) &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every(isEvidencePointer)
   );
 };
 
 const isBestMoment = (value: unknown) => {
   if (!isRecord(value)) return false;
   return (
+    typeof value.key === "string" &&
     typeof value.title === "string" &&
     isNullableString(value.month) &&
     typeof value.line === "string" &&
-    isNullableString(value.excerpt)
+    isNullableString(value.excerpt) &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every(isEvidencePointer)
   );
 };
 
@@ -169,6 +204,7 @@ const isWrapped = (value: unknown) => {
   const archetype = value.archetype;
   const hook = value.hook;
   const timeline = value.timeline;
+  const trips = value.trips;
 
   const isArchetype =
     isRecord(archetype) &&
@@ -194,6 +230,28 @@ const isWrapped = (value: unknown) => {
     isNullableString(timeline.mostActiveWeek) &&
     isNullableString(timeline.mostChaoticWeek);
 
+  const isTrip =
+    isRecord(trips) &&
+    isFiniteNumber(trips.tripCount) &&
+    Array.isArray(trips.topTrips) &&
+    trips.topTrips.every((t: unknown) => {
+      if (!isRecord(t)) return false;
+      return (
+        typeof t.key === "string" &&
+        isNullableString(t.month) &&
+        isNullableString(t.range) &&
+        isNullableString(t.destination) &&
+        typeof t.title === "string" &&
+        isNullableString(t.titlePrivate) &&
+        typeof t.line === "string" &&
+        isFiniteNumber(t.confidence) &&
+        typeof t.level === "string" &&
+        isNullableString(t.excerpt) &&
+        Array.isArray(t.evidence) &&
+        t.evidence.every(isEvidencePointer)
+      );
+    });
+
   return (
     isArchetype &&
     isHook &&
@@ -201,6 +259,7 @@ const isWrapped = (value: unknown) => {
     value.projects.every(isProjectSummary) &&
     Array.isArray(value.bossFights) &&
     value.bossFights.every(isBossFight) &&
+    isTrip &&
     Array.isArray(value.wins) &&
     value.wins.every(
       (w: unknown) =>

@@ -124,8 +124,12 @@ export function generateRewindBangers(
   const topProject = wrapped.projects[0] ?? null;
   const projectCount = wrapped.projects.length;
   const topBoss = wrapped.bossFights[0] ?? null;
+  const tripCount = wrapped.trips.tripCount;
+  const topTrip = wrapped.trips.topTrips[0] ?? null;
   const topRabbitHole = wrapped.rabbitHoles[0] ?? null;
   const weirdRabbit = wrapped.weirdRabbitHole ?? null;
+  const topHighlight = wrapped.lifeHighlights.find((h) => h.level === "high") ?? wrapped.lifeHighlights[0] ?? null;
+  const topMoment = wrapped.bestMoments[0] ?? null;
   const villainMonth = wrapped.timeline.villainMonth;
   const mostChaoticWeek = wrapped.timeline.mostChaoticWeek;
   const longestStreakDays = wrapped.timeline.longestStreakDays;
@@ -198,6 +202,22 @@ export function generateRewindBangers(
     });
   }
 
+  // Trips (no destinations in share-safe lines).
+  if (tripCount > 0) {
+    const line1 = bySpice(spice, {
+      mild: `You planned ${formatCount(tripCount)} trips with me.`,
+      spicy: `You planned ${formatCount(tripCount)} trips with me.`,
+      savage: `You planned ${formatCount(tripCount)} trips with me. Surprises were not invited.`,
+    });
+    add({
+      id: "trips",
+      category: "trips",
+      line1,
+      line2: topTrip?.month ? `(peaked ${topTrip.month})` : undefined,
+      score: 72 + scoreFromCount(tripCount) + scoreFromLength(line1),
+    });
+  }
+
   // Boss fight callout.
   if (topBoss && topBoss.chats > 0) {
     const line1 = bySpice(spice, {
@@ -212,6 +232,27 @@ export function generateRewindBangers(
       line1,
       line2: `(${formatCount(topBoss.chats)} chats${peakHint})`,
       score: 84 + scoreFromCount(topBoss.chats) + scoreFromLength(line1),
+    });
+  }
+
+  // Life highlight (only if high confidence exists).
+  if (
+    topHighlight &&
+    topHighlight.level === "high" &&
+    (topHighlight.type === "language" || topHighlight.type === "fitness" || topHighlight.type === "food")
+  ) {
+    const evidenceChats = topHighlight.evidence.length;
+    const line1 = bySpice(spice, {
+      mild: `${topHighlight.title}.`,
+      spicy: `${topHighlight.title}. Plot twist.`,
+      savage: `${topHighlight.title}. You really committed to the bit.`,
+    });
+    add({
+      id: "highlight",
+      category: "highlights",
+      line1,
+      line2: evidenceChats > 0 ? `(${formatCount(evidenceChats)} chats)` : undefined,
+      score: 60 + scoreFromCount(evidenceChats) + scoreFromLength(line1),
     });
   }
 
@@ -256,6 +297,22 @@ export function generateRewindBangers(
       line1,
       line2: topUpgrade.delta ? `${topUpgrade.line} (${topUpgrade.delta})` : topUpgrade.line,
       score: 66 + scoreFromLength(line1) + scoreFromLength(topUpgrade.line),
+    });
+  }
+
+  // Best moment.
+  if (topMoment) {
+    const line1 = bySpice(spice, {
+      mild: `${topMoment.title}.`,
+      spicy: `${topMoment.title}.`,
+      savage: `${topMoment.title}. Absolute cinema.`,
+    });
+    add({
+      id: "moment",
+      category: "moments",
+      line1,
+      line2: topMoment.month ? `(${topMoment.month})` : undefined,
+      score: 56 + scoreFromLength(line1),
     });
   }
 
@@ -306,15 +363,15 @@ export function generateRewindBangers(
   if (topNickname && topNickname.count >= 2) {
     const line1 = includeSpicyWords
       ? bySpice(spice, {
-          mild: "You gave AI a nickname.",
-          spicy: `Top nickname you gave me: ${safeQuote(topNickname.phrase)}.`,
-          savage: `You called me ${safeQuote(topNickname.phrase)}. Then asked for help anyway.`,
-        })
+        mild: "You gave AI a nickname.",
+        spicy: `Top nickname you gave me: ${safeQuote(topNickname.phrase)}.`,
+        savage: `You called me ${safeQuote(topNickname.phrase)}. Then asked for help anyway.`,
+      })
       : bySpice(spice, {
-          mild: "You gave AI a nickname.",
-          spicy: "You gave me a nickname. We kept it censored.",
-          savage: "You called me something. Then asked for help anyway.",
-        });
+        mild: "You gave AI a nickname.",
+        spicy: "You gave me a nickname. And you meant it.",
+        savage: "You called me something. Then asked for help anyway.",
+      });
     add({
       id: "nickname",
       category: "nickname",
@@ -632,9 +689,10 @@ export function generateRewindBangers(
       pick((b) => ["whiplash", "nickname", "rage", "quick", "contradiction", "boss"].includes(b.category)) ??
       pick(() => true);
     if (first) share.push(first);
-    const second = pick((b) => ["projects", "identity"].includes(b.category)) ?? pick(() => true);
+    const second = pick((b) => ["projects", "trips", "identity"].includes(b.category)) ?? pick(() => true);
     if (second) share.push(second);
-    const third = pick((b) => ["growth", "forecast", "timeline", "weird", "arc"].includes(b.category)) ?? pick(() => true);
+    const third =
+      pick((b) => ["growth", "forecast", "timeline", "weird", "arc", "moments"].includes(b.category)) ?? pick(() => true);
     if (third) share.push(third);
   }
 
