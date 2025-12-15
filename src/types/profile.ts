@@ -26,6 +26,11 @@ export interface Profile {
   suggestedWorkflows: string[];
   confidence: "low" | "medium" | "high";
   evidence?: ProfileEvidence;
+  evidenceMsgIds?: {
+    strengths: string[][];
+    blindSpots: string[][];
+    suggestedWorkflows: string[][];
+  };
   // Optional meta fields returned by the backend
   sourceMode?: SourceMode;
   inputCharCount?: number;

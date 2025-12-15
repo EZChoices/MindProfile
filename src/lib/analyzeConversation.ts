@@ -19,8 +19,8 @@ export interface AnalyzeResult {
   completionTokens?: number;
 }
 
-const PROMPT_VERSION = "v0.5";
-const PROMPT_VERSION_INSUFFICIENT = "v0.5-insufficient";
+const PROMPT_VERSION = "v0.6";
+const PROMPT_VERSION_INSUFFICIENT = "v0.6-insufficient";
 const MIN_CHARS_FOR_PROFILE = 220;
 
 const client = new OpenAI({
@@ -44,11 +44,16 @@ You must respond ONLY with a JSON object matching this TypeScript type:
 
 interface Profile {
   id: string;
-  thinkingStyle: string;          // 1–3 concise sentences, behavioral, no jargon, written as "You ..."
-  communicationStyle: string;     // 1–3 concise sentences about how they talk / ask, written as "You ..."
-  strengths: string[];            // 3–5 bullets, each 1 sentence, very concrete and specific
-  blindSpots: string[];           // 3–5 bullets, each 1 sentence, gently critical but specific
-  suggestedWorkflows: string[];   // 3–5 bullets, each 1 sentence, actionable ways to use AI and other tools better
+  thinkingStyle: string;          // 1-3 concise sentences, behavioral, no jargon, written as "You ..."
+  communicationStyle: string;     // 1-3 concise sentences about how they talk / ask, written as "You ..."
+  strengths: string[];            // 3-5 bullets, each 1 sentence, very concrete and specific
+  blindSpots: string[];           // 3-5 bullets, each 1 sentence, gently critical but specific
+  suggestedWorkflows: string[];   // 3-5 bullets, each 1 sentence, actionable ways to use AI and other tools better
+  evidenceMsgIds: {
+    strengths: string[][];         // same length as strengths; each item has 1-3 msg IDs like ["U3","U14"]
+    blindSpots: string[][];        // same length as blindSpots
+    suggestedWorkflows: string[][];// same length as suggestedWorkflows
+  };
   confidence: "low" | "medium" | "high";
 }
 
@@ -90,6 +95,11 @@ You do not need to list these labels explicitly, but let them shape your descrip
 - Every blind-spot bullet should be connected to a visible pattern in the conversation.
 - Briefly hint at why you think this, e.g. "Because you quickly jump to implementation details..." or "Since you mostly ask about edge cases..."
 - Do NOT invent dramatic psychological issues. Stay close to the observable behavior.
+
+EVIDENCE REQUIREMENT (NON-NEGOTIABLE)
+- For every bullet in strengths, blindSpots, and suggestedWorkflows, you MUST include 1-3 message IDs in evidenceMsgIds for that bullet.
+- The IDs must be chosen from the provided list (U1, U2, ...).
+- If you cannot find evidence for a bullet, DO NOT include that bullet at all.
 
 6) CONFIDENCE
 - Think about how much evidence you really have.
@@ -177,6 +187,14 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
 
   type Turn = { id: string; text: string };
 
+  const normalizeTurnWhitespace = (text: string) =>
+    text
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t]+/g, " ")
+      .replace(/[ \t]*\n[ \t]*/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
   const extractUserTurns = (transcript: string): Turn[] => {
     const lines = transcript.replace(/\r\n/g, "\n").split("\n");
     const turns: Array<{ role: "user" | "assistant"; text: string }> = [];
@@ -216,12 +234,12 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
 
     const userTurns = turns.filter((t) => t.role === "user").map((t, idx) => ({
       id: `U${idx + 1}`,
-      text: t.text.replace(/\s+/g, " ").trim(),
+      text: normalizeTurnWhitespace(t.text),
     }));
 
     if (userTurns.length > 0) return userTurns;
 
-    const fallback = transcript.replace(/\s+/g, " ").trim();
+    const fallback = normalizeTurnWhitespace(transcript);
     return fallback.length ? [{ id: "U1", text: fallback }] : [];
   };
 
@@ -234,12 +252,12 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
     const parts: string[] = [];
     let used = 0;
     for (const t of userTurns) {
-      const line = `${t.id}: ${t.text}`;
-      if (used + line.length + 1 > maxChars) break;
-      parts.push(line);
-      used += line.length + 1;
+      const block = `${t.id}:\n${t.text}`;
+      if (used + block.length + 2 > maxChars) break;
+      parts.push(block);
+      used += block.length + 2;
     }
-    return parts.join("\n");
+    return parts.join("\n\n");
   })();
 
   const userContent = `
@@ -275,6 +293,7 @@ ${userTurnBlock}
     strengths: parsed.strengths ?? [],
     blindSpots: parsed.blindSpots ?? [],
     suggestedWorkflows: parsed.suggestedWorkflows ?? [],
+    evidenceMsgIds: parsed.evidenceMsgIds,
     confidence: parsed.confidence ?? "low",
     sourceMode: input.sourceMode,
     inputCharCount: input.inputCharCount,
@@ -336,13 +355,30 @@ ${userTurnBlock}
       .filter((t) => !/^\d+$/.test(t));
 
   const excerpt = (text: string, maxChars = 160) => {
-    const cleaned = text.replace(/\s+/g, " ").trim();
+    const cleaned = normalizeTurnWhitespace(text);
     if (cleaned.length <= maxChars) return cleaned;
     return cleaned.slice(0, maxChars - 1).trimEnd() + "…";
   };
 
-  const evidenceForList = (items: string[]) => {
-    return items.map((item) => {
+  const buildReceiptsFromMsgIds = (ids: string[] | null | undefined) => {
+    if (!ids || !Array.isArray(ids) || ids.length === 0) return [];
+    const seen = new Set<string>();
+    const receipts: Array<{ msgId: string; excerpt: string }> = [];
+    for (const raw of ids) {
+      const id = typeof raw === "string" ? raw.trim() : "";
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      const turn = userTurnsAll.find((t) => t.id === id);
+      if (!turn) continue;
+      receipts.push({ msgId: id, excerpt: excerpt(turn.text) });
+      if (receipts.length >= 3) break;
+    }
+    return receipts;
+  };
+
+  const evidenceForList = (items: string[], msgIdLists?: string[][]) => {
+    return items.map((item, idx) => {
+      const modelReceipts = buildReceiptsFromMsgIds(msgIdLists?.[idx]);
       const itemTokens = new Set(tokenize(item));
       const scored = userTurnsAll
         .map((turn) => {
@@ -358,12 +394,10 @@ ${userTurnBlock}
       const strong = scored.filter((s) => s.overlap >= 2);
       const weak = scored.filter((s) => s.overlap >= 1);
       const picked = (strong.length > 0 ? strong : weak).slice(0, 2);
-      const receipts =
-        picked.length > 0
-          ? picked.map((p) => ({ msgId: p.turn.id, excerpt: excerpt(p.turn.text) }))
-          : userTurnsAll[0]
-            ? [{ msgId: userTurnsAll[0].id, excerpt: excerpt(userTurnsAll[0].text) }]
-            : [];
+      const overlapReceipts =
+        picked.length > 0 ? picked.map((p) => ({ msgId: p.turn.id, excerpt: excerpt(p.turn.text) })) : [];
+
+      const receipts = modelReceipts.length > 0 ? modelReceipts : overlapReceipts;
 
       return {
         item,
@@ -374,9 +408,9 @@ ${userTurnBlock}
   };
 
   profile.evidence = {
-    strengths: evidenceForList(profile.strengths),
-    blindSpots: evidenceForList(profile.blindSpots),
-    suggestedWorkflows: evidenceForList(profile.suggestedWorkflows),
+    strengths: evidenceForList(profile.strengths, profile.evidenceMsgIds?.strengths),
+    blindSpots: evidenceForList(profile.blindSpots, profile.evidenceMsgIds?.blindSpots),
+    suggestedWorkflows: evidenceForList(profile.suggestedWorkflows, profile.evidenceMsgIds?.suggestedWorkflows),
   };
 
   return {
