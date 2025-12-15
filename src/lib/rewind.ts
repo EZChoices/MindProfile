@@ -14,9 +14,122 @@ export interface PhraseInsight {
 
 export interface RewindEvidencePointer {
   conversationId: string | null;
+  msgId?: string | null;
   startDay: string | null;
   endDay: string | null;
   snippets: string[];
+}
+
+export type ForensicIntent =
+  | "info_seeking"
+  | "decision_support"
+  | "brainstorming"
+  | "drafting_editing"
+  | "coding_technical"
+  | "planning"
+  | "emotional_processing"
+  | "conflict_scripting"
+  | "self_reflection"
+  | "productivity_accountability";
+
+export type ForensicDomain =
+  | "work_career"
+  | "relationships"
+  | "health_fitness"
+  | "money"
+  | "creative"
+  | "learning"
+  | "admin_life_ops"
+  | "travel"
+  | "other";
+
+export type ForensicCognitiveMode = "exploratory" | "convergent" | "debugging" | "reflective";
+
+export type ForensicTone = "calm" | "frustrated" | "anxious" | "excited" | "uncertain" | "motivated" | "tired";
+
+export type ForensicHelpType =
+  | "structure"
+  | "reassurance"
+  | "critique"
+  | "step_by_step"
+  | "examples"
+  | "templates"
+  | "accountability";
+
+export interface RewindMessageTags {
+  intents: ForensicIntent[];
+  domains: ForensicDomain[];
+  cognitiveMode: ForensicCognitiveMode;
+  tones: ForensicTone[];
+  helpTypes: ForensicHelpType[];
+  selfDisclosure: { present: boolean; selfStatements: string[] };
+}
+
+export interface RewindInsight {
+  key: string;
+  title: string;
+  observation: string;
+  evidence: {
+    counts: string[];
+    excerpts: string[];
+    pointers: RewindEvidencePointer[];
+  };
+  interpretation: string;
+  cost: string;
+  experiment: string;
+  successMetric: string;
+  confidence: number;
+}
+
+export interface RewindActionPlan {
+  keepDoing: string[];
+  adjust: string[];
+  stopDoing: string[];
+  promptTemplates: Array<{ title: string; template: string }>;
+}
+
+export interface RewindDeepDive {
+  useMap: {
+    totalSessions: number;
+    avgSessionMins: number | null;
+    avgPromptsPerSession: number | null;
+    resolvedSessions: number;
+    abandonedSessions: number;
+    intents: Array<{ key: ForensicIntent; label: string; count: number; pct: number }>;
+    domains: Array<{ key: ForensicDomain; label: string; count: number; pct: number }>;
+    cognitiveModes: Array<{ key: ForensicCognitiveMode; label: string; count: number; pct: number }>;
+    tones: Array<{ key: ForensicTone; label: string; count: number; pct: number }>;
+    helpTypes: Array<{ key: ForensicHelpType; label: string; count: number; pct: number }>;
+    topOpeners: Array<{ label: string; count: number; excerpt: string | null; evidence: RewindEvidencePointer[] }>;
+    topEndings: Array<{ label: string; count: number; evidence: RewindEvidencePointer[] }>;
+    ratios: {
+      exploratorySessions: number;
+      convergentSessions: number;
+      line: string;
+    };
+  };
+  signaturePrompts: {
+    openingMoves: Array<{ phrase: string; count: number }>;
+    constraints: Array<{ label: string; count: number; line: string }>;
+  };
+  loops: Array<{
+    key: string;
+    title: string;
+    observation: string;
+    evidenceLine: string;
+    evidence: RewindEvidencePointer[];
+    cost: string;
+    experiment: string;
+    successMetric: string;
+    confidence: number;
+  }>;
+  relationshipStyle: {
+    primary: string;
+    line: string;
+    roles: Array<{ role: string; count: number; pct: number }>;
+  };
+  insights: RewindInsight[];
+  actionPlan: RewindActionPlan;
 }
 
 export type RewindIntent =
@@ -174,6 +287,7 @@ export interface RewindWrappedSummary {
   }>;
   youVsYou: string[];
   forecast: string[];
+  deepDive: RewindDeepDive;
   closingLine: string;
 }
 
@@ -225,6 +339,20 @@ export interface RewindSummary {
   behavior: RewindBehavior;
   conversations: RewindConversationSummary[];
   wrapped: RewindWrappedSummary;
+  privacyScan: {
+    emails: number;
+    phones: number;
+    urls: number;
+    handles: number;
+    ips: number;
+    ids: number;
+    secrets: number;
+    ssns: number;
+    cards: number;
+    names: number;
+    passwords: number;
+    addresses: number;
+  };
 }
 
 const STOPWORDS = new Set([
@@ -528,7 +656,7 @@ const extractTravelDestinationMatch = (text: string): TravelDestinationMatch | n
   return null;
 };
 
-const TRANSLATION_CUE_PATTERN = /\btranslate|translation\b/i;
+const TRANSLATION_CUE_PATTERN = /\b(?:translate|translating|translated|translation|localize|localization|i18n|locale)\b/i;
 
 const LANGUAGE_NAMES = [
   "spanish",
@@ -561,14 +689,13 @@ const FITNESS_EVENT_PATTERNS: RegExp[] = [
   /\btraining for\s+(?:a\s+)?(marathon|half marathon)\b/i,
 ];
 
-const FITNESS_TECH_EXCLUDE = /\b(running|run)\s+(?:the\s+)?(code|script|program|tests?)\b/i;
+const FITNESS_TECH_EXCLUDE = /\b(running|run)\s+(?:the\s+)?(code|script|program|tests?|server|app|build|deploy(?:ment)?|pipeline)\b/i;
 
 const FOOD_EVENT_PATTERNS: RegExp[] = [
   /\b(trying|tried|started|starting|learning)\s+(?:to\s+)?(baking|cooking)\b/i,
   /\b(baking|cooking)\s+(?:phase|era)\b/i,
   /\brecipe\s+(?:for|on)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z0-9' -]{2,40})\b/i,
   /\b(?:how to\s+)?(?:cook|make|bake|grill|sous vide|sear|smoke|roast)\s+(?:the\s+|a\s+|an\s+)?([a-z][a-z0-9' -]{2,40})\b/i,
-  /\b(recipe|recipes)\b/i,
 ];
 
 const CAREER_EVENT_PATTERNS: RegExp[] = [
@@ -582,6 +709,168 @@ const MOVE_EVENT_PATTERNS: RegExp[] = [
   /\b(moving|move|relocating|relocation)\b/i,
   /\b(apartment|lease|rent|mortgage)\b/i,
 ];
+
+const SESSION_GAP_MS = 45 * 60 * 1000;
+
+const ADDRESS_LIKE_PATTERN =
+  /\b\d{1,6}\s+[A-Za-z0-9.'\- ]{3,48}\s+(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Boulevard|Blvd|Lane|Ln|Way|Court|Ct|Place|Pl|Terrace|Ter)\b/i;
+
+const PASSWORD_LIKE_PATTERN = /\b(?:password|passwd|pwd)\b\s*[:=]\s*\S{3,}/i;
+
+const relationshipCuePattern =
+  /\b(girlfriend|boyfriend|partner|wife|husband|dating|relationship|breakup|ex|crush|friend|friends|mom|dad|mother|father|sister|brother|family)\b/i;
+
+const moneyCuePattern =
+  /\b(budget|spending|income|invest|investment|stocks?|crypto|tax|taxes|debt|loan|credit|mortgage|interest rate|rent)\b/i;
+
+const healthCuePattern =
+  /\b(doctor|therapy|therapist|meds?|medicine|symptom|diagnos(?:is|ed)|sick|illness|health|sleep|insomnia|diet|nutrition)\b/i;
+
+const emotionalCuePattern =
+  /\b(anxious|anxiety|stressed|stress|overwhelmed|sad|depressed|angry|lonely|burnt out|burned out|panic|worried|worry)\b/i;
+
+const excitedCuePattern = /\b(excited|hyped|can't wait|can’t wait|let's go|lets go|awesome|amazing)\b/i;
+
+const tiredCuePattern = /\b(tired|exhausted|burnt out|burned out|sleepy)\b/i;
+
+const conflictCuePattern =
+  /\b(what should i say|how do i respond|help me respond|reply to|text (?:him|her|them)|message (?:him|her|them)|write a message|draft a text|apology message)\b/i;
+
+const selfReflectionCuePattern =
+  /\b(what does this say about me|why do i|what's wrong with me|what is wrong with me|am i (?:the|a)|my personality|how do i change|i keep doing this)\b/i;
+
+const planningCuePattern =
+  /\b(plan|roadmap|schedule|timeline|checklist|itinerary|steps?|next steps|week plan|routine)\b/i;
+
+const draftingCuePattern =
+  /\b(rewrite|rephrase|edit|proofread|tone|voice|make this sound|draft|email|cover letter|resume|cv|linkedin|bio)\b/i;
+
+const brainstormingCuePattern = /\b(brainstorm|ideas?|options?|alternatives?|different ways|creative)\b/i;
+
+const decisionCuePattern =
+  /\b(should i|which (?:is|one|option)|pick|choose|decide|decision|pros and cons|what's better|what is better|recommend)\b/i;
+
+const structureCuePattern = /\b(outline|structure|framework|checklist|bullet|bullets|table|rubric)\b/i;
+
+const reassuranceCuePattern = /\b(is it ok(?:ay)?|am i ok(?:ay)?|should i worry|reassure|normal to|is this normal)\b/i;
+
+const critiqueCuePattern = /\b(critique|feedback|review|roast|be harsh|be brutally honest)\b/i;
+
+const exampleCuePattern = /\b(example|examples|show me|sample)\b/i;
+
+const templateCuePattern = /\b(template|boilerplate|format|script)\b/i;
+
+const accountabilityCuePattern = /\b(accountability|hold me accountable|check in|remind me|daily check)\b/i;
+
+const selfStatementCuePattern =
+  /\b(i'm|i am|i feel|i keep|i can'?t|i want|i need|i have|my|we're|we are|we keep)\b/i;
+
+const splitSentences = (text: string) =>
+  text
+    .split(/[\n.!?]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const maskObviousSecrets = (text: string) =>
+  text
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[private key]")
+    .replace(PASSWORD_LIKE_PATTERN, "[password]");
+
+const detectSelfStatements = (text: string): string[] => {
+  const withoutCode = stripCodeBlocks(text);
+  const safe = compressWhitespace(withoutCode);
+  if (!selfStatementCuePattern.test(safe.toLowerCase())) return [];
+  const sentences = splitSentences(safe);
+  const statements: string[] = [];
+  for (const sentence of sentences) {
+    const lowered = sentence.toLowerCase();
+    if (!selfStatementCuePattern.test(lowered)) continue;
+    if (looksTechnicalContext(lowered)) continue;
+    const snippet = makeSnippet(sentence, { maxWords: 18, maxChars: 160, redactNames: false });
+    if (!snippet) continue;
+    if (isBoringSnippet(snippet)) continue;
+    statements.push(snippet);
+    if (statements.length >= 2) break;
+  }
+  return statements;
+};
+
+const tagUserMessageForensic = (rawText: string): RewindMessageTags => {
+  const textNoSecrets = maskObviousSecrets(rawText);
+  const textNoCode = stripCodeBlocks(textNoSecrets);
+  const lowered = textNoCode.toLowerCase();
+
+  const intents: ForensicIntent[] = [];
+  const domains: ForensicDomain[] = [];
+  const tones: ForensicTone[] = [];
+  const helpTypes: ForensicHelpType[] = [];
+
+  const hasTech = looksTechnicalContext(lowered) || /```/.test(rawText);
+  const hasTravel = TRAVEL_CUE_PATTERN.test(textNoCode);
+  const hasCareer = CAREER_EVENT_PATTERNS.some((p) => p.test(textNoCode));
+
+  if (hasTravel) domains.push("travel");
+  if (hasCareer || /\b(job|work|boss|client|startup)\b/i.test(textNoCode)) domains.push("work_career");
+  if (relationshipCuePattern.test(textNoCode)) domains.push("relationships");
+  if (healthCuePattern.test(textNoCode)) domains.push("health_fitness");
+  if (moneyCuePattern.test(textNoCode)) domains.push("money");
+  if (/\b(story|poem|lyrics|character|novel)\b/i.test(textNoCode)) domains.push("creative");
+  if (/\b(learn|study|explain|understand)\b/i.test(textNoCode)) domains.push("learning");
+  if (MOVE_EVENT_PATTERNS.some((p) => p.test(textNoCode)) || /\b(visa|passport)\b/i.test(textNoCode)) domains.push("admin_life_ops");
+  if (domains.length === 0) domains.push("other");
+
+  if (hasTech) intents.push("coding_technical");
+  if (planningCuePattern.test(lowered) || hasTravel) intents.push("planning");
+  if (draftingCuePattern.test(lowered)) intents.push("drafting_editing");
+  if (brainstormingCuePattern.test(lowered)) intents.push("brainstorming");
+  if (decisionCuePattern.test(lowered)) intents.push("decision_support");
+  if (conflictCuePattern.test(lowered)) intents.push("conflict_scripting");
+  if (selfReflectionCuePattern.test(lowered)) intents.push("self_reflection");
+  if (accountabilityCuePattern.test(lowered) || /\b(procrastinat|habit|routine|productivity|discipline)\b/i.test(textNoCode))
+    intents.push("productivity_accountability");
+  if (emotionalCuePattern.test(textNoCode) || /\b(i feel|feelings?)\b/i.test(lowered)) intents.push("emotional_processing");
+  if (intents.length === 0) intents.push("info_seeking");
+
+  if (lowered.includes("step by step") || lowered.includes("walk me through") || lowered.includes("break it down")) {
+    helpTypes.push("step_by_step");
+    helpTypes.push("structure");
+  }
+  if (structureCuePattern.test(lowered)) helpTypes.push("structure");
+  if (exampleCuePattern.test(lowered)) helpTypes.push("examples");
+  if (templateCuePattern.test(lowered)) helpTypes.push("templates");
+  if (reassuranceCuePattern.test(lowered)) helpTypes.push("reassurance");
+  if (critiqueCuePattern.test(lowered)) helpTypes.push("critique");
+  if (accountabilityCuePattern.test(lowered)) helpTypes.push("accountability");
+
+  const hasFrustration = /\b(wtf|why is this broken|doesn'?t work|not working)\b/i.test(textNoCode) || /[!?]{3,}/.test(rawText);
+  if (hasFrustration) tones.push("frustrated");
+  if (emotionalCuePattern.test(textNoCode)) tones.push("anxious");
+  if (excitedCuePattern.test(textNoCode)) tones.push("excited");
+  if (tiredCuePattern.test(textNoCode)) tones.push("tired");
+  const hasUncertain = HEDGE_PATTERNS.some((p) => p.test(lowered));
+  if (hasUncertain) tones.push("uncertain");
+  if (/\b(let'?s|lets|i will|i'm going to|im going to)\b/i.test(textNoCode)) tones.push("motivated");
+  if (tones.length === 0) tones.push("calm");
+
+  const cognitiveMode: ForensicCognitiveMode = hasTech || hasFrustration
+    ? "debugging"
+    : intents.includes("self_reflection") || intents.includes("emotional_processing")
+      ? "reflective"
+      : intents.includes("decision_support")
+        ? "convergent"
+        : "exploratory";
+
+  const selfStatements = detectSelfStatements(textNoSecrets);
+
+  return {
+    intents: Array.from(new Set(intents)),
+    domains: Array.from(new Set(domains)),
+    cognitiveMode,
+    tones: Array.from(new Set(tones)),
+    helpTypes: Array.from(new Set(helpTypes)),
+    selfDisclosure: { present: selfStatements.length > 0, selfStatements },
+  };
+};
 
 const PROJECT_EVIDENCE_PATTERNS: RegExp[] = [
   /\bwebhook\b/i,
@@ -741,11 +1030,40 @@ const extractConversationMessages = (conversation: unknown): unknown[] => {
     const mapped = Object.values(mapping)
       .map((node) => asRecord(node)?.message)
       .filter(Boolean);
-    return mapped;
+    const withTime = mapped
+      .map((m) => {
+        const rec = asRecord(m);
+        const nested = rec ? asRecord(rec.message) : null;
+        const createdAt = parseTimestamp(rec?.create_time ?? nested?.create_time);
+        return { m, ms: createdAt?.getTime() ?? null };
+      })
+      .sort((a, b) => {
+        if (a.ms == null && b.ms == null) return 0;
+        if (a.ms == null) return 1;
+        if (b.ms == null) return -1;
+        return a.ms - b.ms;
+      })
+      .map((x) => x.m);
+    return withTime;
   }
 
   const directMessages = conv.messages ?? nestedConv?.messages;
-  return Array.isArray(directMessages) ? directMessages : [];
+  if (!Array.isArray(directMessages)) return [];
+  const withTime = directMessages
+    .map((m) => {
+      const rec = asRecord(m);
+      const nested = rec ? asRecord(rec.message) : null;
+      const createdAt = parseTimestamp(rec?.create_time ?? nested?.create_time);
+      return { m, ms: createdAt?.getTime() ?? null };
+    })
+    .sort((a, b) => {
+      if (a.ms == null && b.ms == null) return 0;
+      if (a.ms == null) return 1;
+      if (b.ms == null) return -1;
+      return a.ms - b.ms;
+    })
+    .map((x) => x.m);
+  return withTime;
 };
 
 const countMatches = (text: string, pattern: RegExp) => {
@@ -898,6 +1216,68 @@ export function createRewindAnalyzer(options?: {
   let totalUserMessages = 0;
   const conversations: RewindConversationSummary[] = [];
 
+  // Forensic / deep-dive signals (session + message tagging)
+  let totalSessions = 0;
+  let resolvedSessions = 0;
+  let abandonedSessions = 0;
+  let sessionDurationMinsSum = 0;
+  let sessionDurationMinsCount = 0;
+  let sessionPromptsSum = 0;
+
+  const forensicIntentCounts = new Map<ForensicIntent, number>();
+  const forensicDomainCounts = new Map<ForensicDomain, number>();
+  const forensicCognitiveModeCounts = new Map<ForensicCognitiveMode, number>();
+  const forensicToneCounts = new Map<ForensicTone, number>();
+  const forensicHelpTypeCounts = new Map<ForensicHelpType, number>();
+
+  const openerCounts = new Map<
+    string,
+    { key: string; label: string; count: number; excerpts: Set<string>; evidence: Map<string, RewindEvidencePointer> }
+  >();
+
+  const endingCounts = new Map<
+    string,
+    { key: string; label: string; count: number; evidence: Map<string, RewindEvidencePointer> }
+  >();
+
+  const openingPhraseCounts = new Map<string, number>();
+
+  const loopCounts = new Map<
+    string,
+    { key: string; title: string; count: number; evidence: Map<string, RewindEvidencePointer> }
+  >();
+
+  const privacyScan: RewindSummary["privacyScan"] = {
+    emails: 0,
+    phones: 0,
+    urls: 0,
+    handles: 0,
+    ips: 0,
+    ids: 0,
+    secrets: 0,
+    ssns: 0,
+    cards: 0,
+    names: 0,
+    passwords: 0,
+    addresses: 0,
+  };
+
+  const inc = <TKey extends string>(map: Map<TKey, number>, key: TKey, by = 1) => {
+    map.set(key, (map.get(key) ?? 0) + by);
+  };
+
+  const recordEvidencePointer = (
+    dest: Map<string, RewindEvidencePointer>,
+    pointer: RewindEvidencePointer,
+    limit = 18,
+  ) => {
+    if (dest.size >= limit) return;
+    const k = pointer.msgId ?? pointer.conversationId ?? pointer.startDay ?? stableHash(pointer.snippets.join("|"));
+    if (!k) return;
+    if (dest.has(k)) return;
+    dest.set(k, { ...pointer, snippets: pointer.snippets.slice(0, 3) });
+  };
+
   const activeDaysSet = new Set<string>();
   const dayMessageCount = new Map<string, number>();
   const dayChaosCount = new Map<string, number>();
@@ -1009,6 +1389,39 @@ export function createRewindAnalyzer(options?: {
     const conversationEvidenceSnippets = new Set<string>();
     let openerRecorded = false;
 
+    if (title && titleSafeLower && !/^new chat\b/i.test(titleSafeLower)) {
+      const titleSnippet = makeSnippet(stripCodeForEntities(title), { maxWords: 10, maxChars: 96 });
+      if (titleSnippet && !isBoringSnippet(titleSnippet)) {
+        conversationEvidenceSnippets.add(titleSnippet);
+      }
+    }
+
+    // Sessionization inside a conversation (gap-based)
+    let sessionIndex = 0;
+    let sessionStartMs: number | null = null;
+    let sessionLastMs: number | null = null;
+    let sessionUserMessages = 0;
+    let sessionPromptChars = 0;
+    let sessionWinSignals = 0;
+    let sessionFrictionSignals = 0;
+    let sessionLastWinIdx: number | null = null;
+    let sessionLastFrictionIdx: number | null = null;
+    let sessionFirstTags: RewindMessageTags | null = null;
+    let sessionFirstSnippet: string | null = null;
+    let sessionFirstMsgId: string | null = null;
+    let sessionFirstDay: string | null = null;
+    let sessionLastDay: string | null = null;
+    const sessionIntentCounts = new Map<ForensicIntent, number>();
+    const sessionDomainCounts = new Map<ForensicDomain, number>();
+    const sessionCognitiveCounts = new Map<ForensicCognitiveMode, number>();
+    const sessionToneCounts = new Map<ForensicTone, number>();
+    const sessionHelpCounts = new Map<ForensicHelpType, number>();
+    let sessionStartCue = false;
+    let sessionHasRewriteCue = false;
+    let sessionHasReassurance = false;
+    let sessionHasDecision = false;
+    let sessionHasConflict = false;
+
     const conversationLifeCandidates = new Map<
       string,
       {
@@ -1026,6 +1439,173 @@ export function createRewindAnalyzer(options?: {
     const travelSnippets = new Set<string>();
     let travelMessageHits = 0;
     let travelStrongHits = 0;
+
+    const flushSession = () => {
+      if (sessionUserMessages <= 0) return;
+
+      totalSessions += 1;
+      sessionPromptsSum += sessionUserMessages;
+
+      const durationMins =
+        sessionStartMs != null && sessionLastMs != null && sessionLastMs >= sessionStartMs
+          ? Math.round((sessionLastMs - sessionStartMs) / 60000)
+          : null;
+      if (durationMins != null) {
+        sessionDurationMinsSum += durationMins;
+        sessionDurationMinsCount += 1;
+      }
+
+      const endingResolved =
+        sessionLastWinIdx != null && (sessionLastFrictionIdx == null || sessionLastWinIdx > sessionLastFrictionIdx);
+      const ending = endingResolved ? "resolved" : sessionUserMessages >= 2 ? "abandoned" : "unknown";
+
+      if (ending === "resolved") resolvedSessions += 1;
+      if (ending === "abandoned") abandonedSessions += 1;
+
+      const openingIntent = sessionFirstTags?.intents[0] ?? null;
+      const openingDomain = sessionFirstTags?.domains[0] ?? null;
+
+      const intentLabel = (key: ForensicIntent) =>
+        ({
+          info_seeking: "Info-seeking",
+          decision_support: "Decision support",
+          brainstorming: "Brainstorming",
+          drafting_editing: "Drafting & editing",
+          coding_technical: "Coding & technical",
+          planning: "Planning",
+          emotional_processing: "Emotional processing",
+          conflict_scripting: "Conflict scripting",
+          self_reflection: "Self-reflection",
+          productivity_accountability: "Productivity",
+        })[key];
+
+      const domainLabel = (key: ForensicDomain) =>
+        ({
+          work_career: "Work/career",
+          relationships: "Relationships",
+          health_fitness: "Health/fitness",
+          money: "Money",
+          creative: "Creative",
+          learning: "Learning",
+          admin_life_ops: "Life ops",
+          travel: "Travel",
+          other: "Other",
+        })[key];
+
+      if (openingIntent && openingDomain) {
+        const openerKey = `${openingIntent}:${openingDomain}`;
+        const label = `${intentLabel(openingIntent)} · ${domainLabel(openingDomain)}`;
+        const current =
+          openerCounts.get(openerKey) ?? {
+            key: openerKey,
+            label,
+            count: 0,
+            excerpts: new Set<string>(),
+            evidence: new Map<string, RewindEvidencePointer>(),
+          };
+        current.count += 1;
+        if (sessionFirstSnippet) current.excerpts.add(sessionFirstSnippet);
+        recordEvidencePointer(
+          current.evidence,
+          {
+            conversationId,
+            msgId: sessionFirstMsgId,
+            startDay: sessionFirstDay,
+            endDay: sessionLastDay ?? sessionFirstDay,
+            snippets: sessionFirstSnippet ? [sessionFirstSnippet] : ["opening move"],
+          },
+          24,
+        );
+        openerCounts.set(openerKey, current);
+      }
+
+      const endingKey = ending;
+      const endingLabel = ending === "resolved" ? "Resolved" : ending === "abandoned" ? "Abandoned" : "One-and-done";
+      const endingEntry =
+        endingCounts.get(endingKey) ?? { key: endingKey, label: endingLabel, count: 0, evidence: new Map() };
+      endingEntry.count += 1;
+      recordEvidencePointer(
+        endingEntry.evidence,
+        {
+          conversationId,
+          msgId: sessionFirstMsgId,
+          startDay: sessionFirstDay,
+          endDay: sessionLastDay ?? sessionFirstDay,
+          snippets: [endingLabel],
+        },
+        18,
+      );
+      endingCounts.set(endingKey, endingEntry);
+
+      // Session-level cognitive mode: prioritize debugging > reflective > convergent > exploratory
+      const sessionMode: ForensicCognitiveMode = sessionCognitiveCounts.get("debugging")
+        ? "debugging"
+        : sessionCognitiveCounts.get("reflective")
+          ? "reflective"
+          : sessionCognitiveCounts.get("convergent")
+            ? "convergent"
+            : "exploratory";
+      inc(forensicCognitiveModeCounts, sessionMode, 1);
+
+      // Loops (session-scoped, not word-count scoped)
+      const recordLoop = (key: string, title: string, pointer: RewindEvidencePointer) => {
+        const entry =
+          loopCounts.get(key) ?? { key, title, count: 0, evidence: new Map<string, RewindEvidencePointer>() };
+        entry.count += 1;
+        recordEvidencePointer(entry.evidence, pointer, 18);
+        loopCounts.set(key, entry);
+      };
+
+      const pointerBase: RewindEvidencePointer = {
+        conversationId,
+        msgId: sessionFirstMsgId,
+        startDay: sessionFirstDay,
+        endDay: sessionLastDay ?? sessionFirstDay,
+        snippets: sessionFirstSnippet ? [sessionFirstSnippet] : ["signal"],
+      };
+
+      if (sessionStartCue && ending !== "resolved") {
+        recordLoop("start_friction", "The starting friction loop", { ...pointerBase, snippets: ["help me start"] });
+      }
+      if (sessionHasReassurance && ending !== "resolved") {
+        recordLoop("reassurance", "The reassurance loop", { ...pointerBase, snippets: ["is this normal"] });
+      }
+      if (sessionHasDecision && ending !== "resolved") {
+        recordLoop("decision_paralysis", "Decision paralysis", { ...pointerBase, snippets: ["should I"] });
+      }
+      if (sessionHasRewriteCue && ending !== "resolved" && sessionUserMessages >= 10) {
+        recordLoop("perfection", "The perfection loop", { ...pointerBase, snippets: ["rewrite"] });
+      }
+      if (sessionHasConflict && ending !== "resolved") {
+        recordLoop("avoidance", "The avoidance loop", { ...pointerBase, snippets: ["what should I say"] });
+      }
+
+      // Reset session state
+      sessionIndex += 1;
+      sessionStartMs = null;
+      sessionLastMs = null;
+      sessionUserMessages = 0;
+      sessionPromptChars = 0;
+      sessionWinSignals = 0;
+      sessionFrictionSignals = 0;
+      sessionLastWinIdx = null;
+      sessionLastFrictionIdx = null;
+      sessionFirstTags = null;
+      sessionFirstSnippet = null;
+      sessionFirstMsgId = null;
+      sessionFirstDay = null;
+      sessionLastDay = null;
+      sessionIntentCounts.clear();
+      sessionDomainCounts.clear();
+      sessionCognitiveCounts.clear();
+      sessionToneCounts.clear();
+      sessionHelpCounts.clear();
+      sessionStartCue = false;
+      sessionHasRewriteCue = false;
+      sessionHasReassurance = false;
+      sessionHasDecision = false;
+      sessionHasConflict = false;
+    };
 
     const recordConversationEvidence = (raw: string) => {
       const snippet = makeSnippet(raw, { maxWords: 12, maxChars: 120 });
@@ -1132,21 +1712,102 @@ export function createRewindAnalyzer(options?: {
       const rawText = normalizeMessageContent(msgRecord);
       if (!rawText) continue;
 
-      const scrubbed = anonymizeText(rawText, { redactNames: false }).sanitized;
-      const { sanitized } = anonymizeText(scrubbed);
-      const trimmed = sanitized.trim();
+      if (PASSWORD_LIKE_PATTERN.test(rawText)) privacyScan.passwords += 1;
+      if (ADDRESS_LIKE_PATTERN.test(rawText)) privacyScan.addresses += 1;
+
+      const rawTextSafe = maskObviousSecrets(rawText);
+      const scrub = anonymizeText(rawTextSafe, { redactNames: false });
+      privacyScan.emails += scrub.replacements.emails;
+      privacyScan.phones += scrub.replacements.phones;
+      privacyScan.urls += scrub.replacements.urls;
+      privacyScan.handles += scrub.replacements.handles;
+      privacyScan.ips += scrub.replacements.ips;
+      privacyScan.ids += scrub.replacements.ids;
+      privacyScan.secrets += scrub.replacements.secrets;
+      privacyScan.ssns += scrub.replacements.ssns;
+      privacyScan.cards += scrub.replacements.cards;
+
+      const scrubbed = scrub.sanitized;
+      const scrubNames = anonymizeText(scrubbed, { redactNames: true });
+      privacyScan.names += scrubNames.replacements.names;
+
+      const trimmed = scrubNames.sanitized.trim();
       const trimmedFlavor = scrubbed.trim();
       if (!trimmed.length) continue;
+
+      const msgIdRaw = msgRecord.id ?? nestedMessageRecord?.id;
+      const msgId =
+        typeof msgIdRaw === "string" && msgIdRaw.trim().length
+          ? msgIdRaw.trim()
+          : `msg:${stableHash(`${conversationId ?? "noid"}|${createdAt?.getTime() ?? "notime"}|${sessionIndex}|${conversationUserMessageCount}`)}`;
 
       conversationHasIncluded = true;
       totalUserMessages += 1;
       conversationUserMessageCount += 1;
+
+      // Session boundary detection (gap-based)
+      if (createdAt) {
+        const ms = createdAt.getTime();
+        if (sessionLastMs != null && ms - sessionLastMs > SESSION_GAP_MS) {
+          flushSession();
+        }
+        if (sessionStartMs == null) sessionStartMs = ms;
+        sessionLastMs = ms;
+        sessionLastDay = formatDayKeyLocal(createdAt);
+        if (sessionFirstDay == null) sessionFirstDay = sessionLastDay;
+      }
+
+      const tags = tagUserMessageForensic(rawTextSafe);
+      tags.intents.forEach((k) => {
+        inc(forensicIntentCounts, k);
+        inc(sessionIntentCounts, k);
+      });
+      tags.domains.forEach((k) => {
+        inc(forensicDomainCounts, k);
+        inc(sessionDomainCounts, k);
+      });
+      inc(sessionCognitiveCounts, tags.cognitiveMode);
+      tags.tones.forEach((k) => {
+        inc(forensicToneCounts, k);
+        inc(sessionToneCounts, k);
+      });
+      tags.helpTypes.forEach((k) => {
+        inc(forensicHelpTypeCounts, k);
+        inc(sessionHelpCounts, k);
+      });
+
+      if (!sessionFirstTags) {
+        sessionFirstTags = tags;
+        sessionFirstMsgId = msgId;
+
+        const opener = stripCodeForEntities(trimmedFlavor) || trimmedFlavor;
+        const openerSnippet = opener ? makeSnippet(opener, { maxWords: 14, maxChars: 140 }) : null;
+        if (openerSnippet && !isBoringSnippet(openerSnippet)) sessionFirstSnippet = openerSnippet;
+
+        const safeOpener = anonymizeText(stripCodeBlocks(rawTextSafe), { redactNames: true }).sanitized;
+        const words = safeOpener.split(/\s+/).filter(Boolean).slice(0, 4);
+        const phrase = words.join(" ").toLowerCase();
+        if (phrase.length >= 6 && phrase.length <= 56) {
+          openingPhraseCounts.set(phrase, (openingPhraseCounts.get(phrase) ?? 0) + 1);
+        }
+
+        if (/\b(help me start|get started|how do i start)\b/i.test(rawTextSafe)) {
+          sessionStartCue = true;
+        }
+      }
+
+      if (tags.helpTypes.includes("reassurance")) sessionHasReassurance = true;
+      if (tags.intents.includes("decision_support")) sessionHasDecision = true;
+      if (tags.intents.includes("conflict_scripting")) sessionHasConflict = true;
+      if (/\b(rewrite|rephrase|edit)\b/i.test(rawTextSafe)) sessionHasRewriteCue = true;
 
       const len = trimmed.length;
       totalPromptChars += len;
       if (len > longestPromptChars) longestPromptChars = len;
       conversationPromptChars += len;
       if (len > conversationMaxPromptChars) conversationMaxPromptChars = len;
+      sessionPromptChars += len;
+      sessionUserMessages += 1;
 
       if (createdAt) {
         const ms = createdAt.getTime();
@@ -1205,6 +1866,10 @@ export function createRewindAnalyzer(options?: {
       if (messageWinHits > 0 && firstWinTurn === null) {
         firstWinTurn = conversationUserMessageCount;
       }
+      if (messageWinHits > 0) {
+        sessionWinSignals += messageWinHits;
+        sessionLastWinIdx = sessionUserMessages;
+      }
 
       let messageIndecisionHits = 0;
       for (const pat of INDECISION_PATTERNS) {
@@ -1247,11 +1912,19 @@ export function createRewindAnalyzer(options?: {
       }
 
       if (!isTechnical && entityText) {
-        const languageMatch = LANGUAGE_LEARN_PATTERN.exec(entityLower) ?? LANGUAGE_PRACTICE_PATTERN.exec(entityLower);
-        if (languageMatch?.[1]) {
-          const lang = languageMatch[1].toLowerCase();
-          const label = lang.charAt(0).toUpperCase() + lang.slice(1);
-          recordLifeCandidate({ type: "language", labelSafe: label, labelPrivate: label, snippet: languageMatch[0], strong: true });
+        if (!TRANSLATION_CUE_PATTERN.test(entityLower)) {
+          const languageMatch = LANGUAGE_LEARN_PATTERN.exec(entityLower) ?? LANGUAGE_PRACTICE_PATTERN.exec(entityLower);
+          if (languageMatch?.[1]) {
+            const lang = languageMatch[1].toLowerCase();
+            const label = lang.charAt(0).toUpperCase() + lang.slice(1);
+            recordLifeCandidate({
+              type: "language",
+              labelSafe: label,
+              labelPrivate: label,
+              snippet: languageMatch[0],
+              strong: true,
+            });
+          }
         }
 
         if (!FITNESS_TECH_EXCLUDE.test(entityLower)) {
@@ -1387,10 +2060,13 @@ export function createRewindAnalyzer(options?: {
       if (isRage) {
         rageMessageCount += 1;
         conversationFrictionMessages += 1;
+        sessionFrictionSignals += 1;
+        sessionLastFrictionIdx = sessionUserMessages;
       }
 
-      // Word frequencies
-      const tokens = tokenize(lowered);
+      // Word frequencies (prefer non-code, flavor-preserving text)
+      const wordSource = entityLower || lowered;
+      const tokens = tokenize(wordSource);
       for (const token of tokens) {
         if (ANON_TOKENS.has(token)) continue;
         if (token.length < 3) continue;
@@ -1432,6 +2108,8 @@ export function createRewindAnalyzer(options?: {
         }
       }
     }
+
+    flushSession();
 
     if (!conversationHasIncluded) return;
 
@@ -1709,7 +2387,10 @@ export function createRewindAnalyzer(options?: {
     const avgPromptChars =
       totalUserMessages > 0 ? Math.round(totalPromptChars / totalUserMessages) : null;
 
-    const topWord: string | null = null;
+    const topWord: string | null =
+      Array.from(wordFreq.entries())
+        .sort((a, b) => b[1] - a[1])
+        .find(([, count]) => count >= 8)?.[0] ?? null;
 
     const frequentPhrases = Array.from(habitCounts.entries())
       .filter(([, count]) => count >= 5)
@@ -2058,7 +2739,24 @@ export function createRewindAnalyzer(options?: {
         return best;
       };
 
-      const artifactNoun = (key: string, deliverable: RewindDeliverable) => {
+      const inferArtifactOverride = (textLower: string, stack: string[]) => {
+        const ctx = `${textLower} ${stack.join(" ").toLowerCase()}`;
+        if (/\bchrome extension\b|\bbrowser extension\b/.test(ctx)) return "a browser extension";
+        if (/\bdiscord\b/.test(ctx) && /\bbot\b/.test(ctx)) return "a Discord bot";
+        if (/\btelegram\b/.test(ctx) && /\bbot\b/.test(ctx)) return "a Telegram bot";
+        if (/\bslack\b/.test(ctx)) return "a Slack integration";
+        if (/\bnotion\b/.test(ctx)) return "a Notion system";
+        if (/\bairtable\b/.test(ctx)) return "an Airtable base";
+        if (/\bgoogle sheets\b|\bsheets\b|\bexcel\b|\bspreadsheet\b/.test(ctx)) return "a spreadsheet workflow";
+        if (/\bweb scraper\b|\bscraper\b|\bcrawler\b/.test(ctx)) return "a scraper";
+        if (/\bcli\b|\bcommand[- ]line\b/.test(ctx)) return "a CLI tool";
+        if (/\bchrome\b/.test(ctx) && /\bextension\b/.test(ctx)) return "a browser extension";
+        if (/\bmobile app\b|\bios\b|\bandroid\b/.test(ctx)) return "a mobile app";
+        return null;
+      };
+
+      const artifactNoun = (key: string, deliverable: RewindDeliverable, override: string | null) => {
+        if (override) return override;
         if (key === "dashboard") return "a dashboard";
         if (key === "api") return "an API";
         if (key === "automation") return "an automation";
@@ -2081,8 +2779,13 @@ export function createRewindAnalyzer(options?: {
         return "something";
       };
 
-      const whatBuilt = (key: string, deliverable: RewindDeliverable, stackTop: string | null) => {
-        const noun = artifactNoun(key, deliverable);
+      const whatBuilt = (
+        key: string,
+        deliverable: RewindDeliverable,
+        stackTop: string | null,
+        artifactOverride: string | null,
+      ) => {
+        const noun = artifactNoun(key, deliverable, artifactOverride);
         const stackHint = stackTop ? ` (${stackTop})` : "";
         switch (key) {
           case "automation":
@@ -2172,9 +2875,10 @@ export function createRewindAnalyzer(options?: {
           })();
 
           const signatureShort = signature ? makeSnippet(signature, { maxWords: 7, maxChars: 64 }) : null;
-          const labelPrivate = signatureShort ? `${labelSafe} — ${signatureShort}` : labelPrivateBase;
+          const labelPrivate = signatureShort ? `${labelSafe} - ${signatureShort}` : labelPrivateBase;
 
-          const whatSafe = whatBuilt(cluster.projectKey, topDeliverable, stackTop);
+          const artifactOverride = inferArtifactOverride((signature ?? "").toLowerCase(), stack);
+          const whatSafe = whatBuilt(cluster.projectKey, topDeliverable, stackTop, artifactOverride);
           const whatPrivate = (() => {
             if (!stackPair) return whatSafe;
             if (cluster.projectKey === "automation") return `An automation to connect ${stackPair}.`;
@@ -2552,8 +3256,12 @@ export function createRewindAnalyzer(options?: {
       };
 
       const byDestination = new Map<string, typeof travelConversations>();
+      const unknownDestination: typeof travelConversations = [];
       for (const conv of travelConversations) {
-        if (!conv.destination) continue;
+        if (!conv.destination) {
+          unknownDestination.push(conv);
+          continue;
+        }
         const key = conv.destination.toLowerCase();
         const current = byDestination.get(key) ?? [];
         current.push(conv);
@@ -2561,6 +3269,7 @@ export function createRewindAnalyzer(options?: {
       }
 
       const clusters: RewindWrappedSummary["trips"]["topTrips"] = [];
+
       for (const [destKey, convs] of byDestination.entries()) {
         const sorted = [...convs].sort((a, b) => (dayKeyUtcMs(a.startDay ?? "") ?? 0) - (dayKeyUtcMs(b.startDay ?? "") ?? 0));
         let current: typeof sorted = [];
@@ -2635,9 +3344,91 @@ export function createRewindAnalyzer(options?: {
         flush();
       }
 
-      clusters.sort((a, b) => b.evidence.length - a.evidence.length || (b.confidence - a.confidence));
-      const high = clusters.filter((t) => t.level === "high");
-      return { tripCount: high.length, topTrips: high.slice(0, 3) };
+      if (unknownDestination.length > 0) {
+        const sorted = [...unknownDestination].sort((a, b) => (dayKeyUtcMs(a.startDay ?? "") ?? 0) - (dayKeyUtcMs(b.startDay ?? "") ?? 0));
+        let current: typeof sorted = [];
+        let lastMs: number | null = null;
+
+        const flush = () => {
+          if (current.length === 0) return;
+          const chats = current.length;
+          const messageHits = current.reduce((sum, c) => sum + c.messageHits, 0);
+          const strongHits = current.reduce((sum, c) => sum + c.strongHits, 0);
+          if (chats < 2 && messageHits < 4) {
+            current = [];
+            lastMs = null;
+            return;
+          }
+
+          const start = current.map((c) => c.startDay).filter(Boolean).sort()[0] ?? null;
+          const end = current.map((c) => c.endDay ?? c.startDay).filter(Boolean).sort().slice(-1)[0] ?? start;
+          const peakMonth =
+            current
+              .map((c) => c.month)
+              .filter((m): m is string => typeof m === "string")
+              .sort()[0] ?? null;
+
+          const snippetHint = current.flatMap((c) => c.snippets).filter(Boolean)[0] ?? null;
+          const hint = snippetHint ? makeSnippet(snippetHint, { maxWords: 8, maxChars: 72 }) : null;
+
+          let confidence = 0.2;
+          if (chats >= 2) confidence += 0.35;
+          if (messageHits >= 4) confidence += 0.2;
+          if (strongHits >= 2) confidence += 0.2;
+          confidence = clamp01(confidence);
+          let level: "high" | "medium" | "low" = confidence >= 0.75 ? "high" : confidence >= 0.6 ? "medium" : "low";
+          if (level === "high" && strongHits === 0) level = "medium";
+
+          const evidence = current
+            .slice(0, 10)
+            .map((c) => ({
+              conversationId: c.conversationId,
+              startDay: c.startDay,
+              endDay: c.endDay,
+              snippets: c.snippets.slice(0, 3),
+            }));
+
+          const key = `trip:unknown:${stableHash(String(start ?? ""))}:${stableHash(String(hint ?? ""))}`;
+
+          clusters.push({
+            key,
+            month: peakMonth ? monthLabel(peakMonth) : null,
+            range: formatRange(start, end),
+            destination: null,
+            title: "Trip planning",
+            titlePrivate: hint ? `Trip planning: ${hint}` : null,
+            line: "Flights. Stays. And \"what should we do\" energy.",
+            confidence,
+            level,
+            excerpt: hint,
+            evidence,
+          });
+
+          current = [];
+          lastMs = null;
+        };
+
+        for (const conv of sorted) {
+          const ms = conv.startDay ? dayKeyUtcMs(conv.startDay) : null;
+          if (ms == null) {
+            current.push(conv);
+            continue;
+          }
+          if (lastMs != null && ms - lastMs > 30 * 24 * 60 * 60 * 1000) {
+            flush();
+          }
+          current.push(conv);
+          lastMs = ms;
+        }
+        flush();
+      }
+
+      clusters.sort((a, b) => {
+        const levelScore = (x: typeof a) => (x.level === "high" ? 3 : x.level === "medium" ? 2 : 1);
+        return levelScore(b) - levelScore(a) || b.confidence - a.confidence || b.evidence.length - a.evidence.length;
+      });
+      const visible = clusters.filter((t) => t.level !== "low");
+      return { tripCount: visible.length, topTrips: visible.slice(0, 3) };
     })();
 
     const lifeHighlights = (() => {
@@ -2649,7 +3440,7 @@ export function createRewindAnalyzer(options?: {
       const titleFor = (type: string, label: string) => {
         switch (type) {
           case "language":
-            return `Learning ${label}`;
+            return `${label} practice`;
           case "career":
             return `${label} season`;
           case "fitness":
@@ -2663,16 +3454,16 @@ export function createRewindAnalyzer(options?: {
         }
       };
 
-      const lineFor = (type: string) => {
+      const lineFor = (type: string, label: string) => {
         switch (type) {
           case "language":
-            return "Not just vibes. Actual practice.";
+            return `You kept coming back to ${label}. Not just once.`;
           case "career":
-            return "You brought real-life moves here. Respect.";
+            return "Real-life moves made it into the chat log. Respect.";
           case "fitness":
-            return "You tried to be that person. For real.";
+            return `You had a ${label.toLowerCase()} era. We saw it.`;
           case "food":
-            return "A whole phase. We saw it.";
+            return `You asked about ${label.toLowerCase()}. Priorities.`;
           case "life":
             return "Real-life logistics made an appearance.";
           default:
@@ -2680,7 +3471,11 @@ export function createRewindAnalyzer(options?: {
         }
       };
 
-      const candidates = Array.from(lifeHighlightAccumulators.values()).filter((c) => c.chats >= 2 || c.messages >= 3);
+      const candidates = Array.from(lifeHighlightAccumulators.values()).filter((c) => {
+        if (c.type === "language") return c.messages >= 3;
+        if (c.type === "fitness") return c.messages >= 3;
+        return c.chats >= 2 || c.messages >= 3;
+      });
 
       const out: RewindWrappedSummary["lifeHighlights"] = [];
       for (const c of candidates) {
@@ -2706,7 +3501,7 @@ export function createRewindAnalyzer(options?: {
           month,
           title: titleFor(c.type, c.labelSafe),
           titlePrivate: c.labelPrivate ? titleFor(c.type, c.labelPrivate) : null,
-          line: lineFor(c.type),
+          line: lineFor(c.type, c.labelSafe),
           confidence,
           level,
           excerpt,
@@ -3041,6 +3836,447 @@ export function createRewindAnalyzer(options?: {
         ? "This wasn't about answers. It was about building momentum."
         : "This wasn't about answers. It was about getting unstuck.";
 
+    const deepDive: RewindDeepDive = (() => {
+      const pct = (count: number, total: number) => (total > 0 ? Math.round((count / total) * 100) : 0);
+
+      const dist = <TKey extends string>(
+        map: Map<TKey, number>,
+        labelFor: (key: TKey) => string,
+      ): Array<{ key: TKey; label: string; count: number; pct: number }> => {
+        const total = Array.from(map.values()).reduce((sum, v) => sum + v, 0);
+        return Array.from(map.entries())
+          .map(([key, count]) => ({ key, label: labelFor(key), count, pct: pct(count, total) }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 8);
+      };
+
+      const intentLabel = (key: ForensicIntent) =>
+        ({
+          info_seeking: "Info-seeking",
+          decision_support: "Decision support",
+          brainstorming: "Brainstorming",
+          drafting_editing: "Drafting & editing",
+          coding_technical: "Coding & technical",
+          planning: "Planning",
+          emotional_processing: "Emotional processing",
+          conflict_scripting: "Conflict scripting",
+          self_reflection: "Self-reflection",
+          productivity_accountability: "Productivity",
+        })[key];
+
+      const domainLabel = (key: ForensicDomain) =>
+        ({
+          work_career: "Work/career",
+          relationships: "Relationships",
+          health_fitness: "Health/fitness",
+          money: "Money",
+          creative: "Creative",
+          learning: "Learning",
+          admin_life_ops: "Life ops",
+          travel: "Travel",
+          other: "Other",
+        })[key];
+
+      const cognitiveLabel = (key: ForensicCognitiveMode) =>
+        ({
+          exploratory: "Exploring",
+          convergent: "Deciding",
+          debugging: "Debugging",
+          reflective: "Reflecting",
+        })[key];
+
+      const toneLabel = (key: ForensicTone) =>
+        ({
+          calm: "Calm",
+          frustrated: "Frustrated",
+          anxious: "Anxious",
+          excited: "Excited",
+          uncertain: "Uncertain",
+          motivated: "Motivated",
+          tired: "Tired",
+        })[key];
+
+      const helpLabel = (key: ForensicHelpType) =>
+        ({
+          structure: "Structure",
+          reassurance: "Reassurance",
+          critique: "Critique",
+          step_by_step: "Step-by-step",
+          examples: "Examples",
+          templates: "Templates",
+          accountability: "Accountability",
+        })[key];
+
+      const avgSessionMins = sessionDurationMinsCount > 0 ? Math.round(sessionDurationMinsSum / sessionDurationMinsCount) : null;
+      const avgPromptsPerSession = totalSessions > 0 ? Math.round(sessionPromptsSum / totalSessions) : null;
+
+      const topOpeners = Array.from(openerCounts.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+        .map((o) => ({
+          label: o.label,
+          count: o.count,
+          excerpt: Array.from(o.excerpts)[0] ?? null,
+          evidence: Array.from(o.evidence.values()).slice(0, 3),
+        }));
+
+      const topEndings = Array.from(endingCounts.values())
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3)
+        .map((e) => ({ label: e.label, count: e.count, evidence: Array.from(e.evidence.values()).slice(0, 3) }));
+
+      const exploratorySessions = forensicCognitiveModeCounts.get("exploratory") ?? 0;
+      const convergentSessions = forensicCognitiveModeCounts.get("convergent") ?? 0;
+      const line =
+        convergentSessions > 0
+          ? `Options mode: ${exploratorySessions.toLocaleString()} sessions. Decision mode: ${convergentSessions.toLocaleString()} sessions.`
+          : `Mostly options mode: ${exploratorySessions.toLocaleString()} sessions of exploring.`;
+
+      const signatureOpeningMoves = Array.from(openingPhraseCounts.entries())
+        .filter(([phrase, count]) => {
+          if (count < 4) return false;
+          if (phrase === "can you" || phrase === "please help" || phrase === "help me" || phrase === "i need") return false;
+          const tokens = phrase.split(/\s+/).filter(Boolean);
+          const significant = tokens.filter((t) => t.length >= 4 && !STOPWORDS.has(t));
+          return significant.length >= 1;
+        })
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([phrase, count]) => ({ phrase, count }));
+
+      const constraints: RewindDeepDive["signaturePrompts"]["constraints"] = [];
+      if (behavior.stepByStepCount >= 10) {
+        constraints.push({
+          label: "Step-by-step",
+          count: behavior.stepByStepCount,
+          line: `You asked for "step by step" ${behavior.stepByStepCount.toLocaleString()} times. You like clean sequences.`,
+        });
+      }
+      const templateCount = forensicHelpTypeCounts.get("templates") ?? 0;
+      if (templateCount >= 12) {
+        constraints.push({
+          label: "Templates",
+          count: templateCount,
+          line: "You don't want vibes. You want a starting point you can copy/paste.",
+        });
+      }
+      const critiqueCount = forensicHelpTypeCounts.get("critique") ?? 0;
+      if (critiqueCount >= 10) {
+        constraints.push({
+          label: "Critique",
+          count: critiqueCount,
+          line: "You asked for critique more than comfort. Respect.",
+        });
+      }
+      const exampleCount = forensicHelpTypeCounts.get("examples") ?? 0;
+      if (exampleCount >= 12) {
+        constraints.push({
+          label: "Examples",
+          count: exampleCount,
+          line: "You learn by pattern-matching. 'Show me' is your move.",
+        });
+      }
+      if (constraints.length === 0) {
+        constraints.push({ label: "Momentum", count: 0, line: "You mostly used AI to keep momentum - quick asks, quick pivots." });
+      }
+
+      const resolvedRate = totalSessions > 0 ? Math.round((resolvedSessions / totalSessions) * 100) : 0;
+
+      const loops = Array.from(loopCounts.values())
+        .filter((l) => l.count >= 3)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5)
+        .map((l) => {
+          const evidence = Array.from(l.evidence.values()).slice(0, 3);
+          const confidence = clamp01(0.45 + Math.min(l.count / 14, 0.5));
+
+          const script = (() => {
+            switch (l.key) {
+              case "start_friction":
+                return {
+                  cost: "You lose time at the starting line. Momentum dies before it begins.",
+                  experiment:
+                    "Start every 'start' session with: 3 options + 1 recommended path + a 10-minute v1. Then force a v2.",
+                  metric: `Raise your resolved-session rate from ${resolvedRate}% to ${Math.min(99, resolvedRate + 10)}%.`,
+                };
+              case "reassurance":
+                return {
+                  cost: "You get relief, then the same worry comes back in a new outfit.",
+                  experiment:
+                    "When you want reassurance, ask for a 3-step plan + one tiny action to take today (not a pep talk).",
+                  metric: `Reduce abandoned sessions by 10% (baseline: ${abandonedSessions.toLocaleString()} abandoned).`,
+                };
+              case "decision_paralysis":
+                return {
+                  cost: "You gather angles, but delay the commit.",
+                  experiment:
+                    "Use a decision prompt: constraints first, then 'pick 1', then 'tell me what to do next in 20 minutes'.",
+                  metric: `Increase decision-mode sessions by 10% without lowering your resolved rate (${resolvedRate}%).`,
+                };
+              case "perfection":
+                return {
+                  cost: "You polish the draft instead of shipping it.",
+                  experiment:
+                    "Set a hard rule: 2 drafts max. After v2, you send/ship, then you iterate based on reality.",
+                  metric: `Increase resolved sessions while lowering prompts-per-session (baseline: ${avgPromptsPerSession ?? 0}).`,
+                };
+              case "avoidance":
+                return {
+                  cost: "You rehearse the message more than you send it.",
+                  experiment:
+                    "Ask for 3 versions, pick one, and send it within 10 minutes. Then debrief what happened.",
+                  metric: "More sessions that end with a send / done / solved signal.",
+                };
+              default:
+                return {
+                  cost: "It keeps pulling you back in.",
+                  experiment: "Run a smaller loop: ask 3 questions, pick 1 action, do it, then come back.",
+                  metric: "More sessions ending with a win signal.",
+                };
+            }
+          })();
+
+          return {
+            key: l.key,
+            title: l.title,
+            observation: `This showed up in ${l.count.toLocaleString()} sessions.`,
+            evidenceLine: `${l.count.toLocaleString()} sessions (not a one-off).`,
+            evidence,
+            cost: script.cost,
+            experiment: script.experiment,
+            successMetric: script.metric,
+            confidence,
+          };
+        });
+
+      const relationshipStyle = (() => {
+        const roleCounts = new Map<string, number>();
+        const addRole = (role: string, count: number) => roleCounts.set(role, (roleCounts.get(role) ?? 0) + count);
+
+        for (const [intent, count] of forensicIntentCounts.entries()) {
+          switch (intent) {
+            case "coding_technical":
+              addRole("Co-builder", count);
+              break;
+            case "drafting_editing":
+              addRole("Editor", count);
+              break;
+            case "planning":
+              addRole("Planner", count);
+              break;
+            case "decision_support":
+              addRole("Strategist", count);
+              break;
+            case "brainstorming":
+              addRole("Idea generator", count);
+              break;
+            case "info_seeking":
+              addRole("Tutor", count);
+              break;
+            case "emotional_processing":
+              addRole("Coach", count);
+              break;
+            case "self_reflection":
+              addRole("Mirror", count);
+              break;
+            case "conflict_scripting":
+              addRole("Scriptwriter", count);
+              break;
+            case "productivity_accountability":
+              addRole("Accountability buddy", count);
+              break;
+          }
+        }
+
+        const total = Array.from(roleCounts.values()).reduce((sum, v) => sum + v, 0);
+        const roles = Array.from(roleCounts.entries())
+          .map(([role, count]) => ({ role, count, pct: pct(count, total) }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 6);
+
+        const primary = roles[0]?.role ?? "Second brain";
+        const secondary = roles[1]?.role ?? null;
+        const line = secondary
+          ? `Mostly a ${primary.toLowerCase()}. Second most: ${secondary.toLowerCase()}.`
+          : `Mostly a ${primary.toLowerCase()}.`;
+
+        return { primary, line, roles };
+      })();
+
+      const insights: RewindInsight[] = (() => {
+        const out: RewindInsight[] = [];
+        const topOpener = topOpeners[0] ?? null;
+        if (topOpener && topOpener.count >= 10) {
+          const confidence = clamp01(0.45 + Math.min(topOpener.count / 40, 0.45));
+          out.push({
+            key: "insight:opening",
+            title: "Your opening move",
+            observation: `Most sessions started as ${topOpener.label.toLowerCase()}.`,
+            evidence: {
+              counts: [`Top opening move: ${topOpener.label} (${topOpener.count.toLocaleString()} sessions).`],
+              excerpts: topOpener.excerpt ? [topOpener.excerpt] : [],
+              pointers: topOpener.evidence.slice(0, 3),
+            },
+            interpretation: "You use AI to get traction fast: direction first, details second.",
+            cost: "When the opener is fuzzy, the rest of the session drifts.",
+            experiment: "Start with constraints: goal, deadline, and what 'done' looks like. Then ask for a v1 immediately.",
+            successMetric: `More sessions ending resolved (baseline: ${resolvedRate}%).`,
+            confidence,
+          });
+        }
+
+        const topLoop = loops[0] ?? null;
+        if (topLoop) {
+          out.push({
+            key: `insight:loop:${topLoop.key}`,
+            title: topLoop.title,
+            observation: topLoop.observation,
+            evidence: {
+              counts: [topLoop.evidenceLine],
+              excerpts: [],
+              pointers: topLoop.evidence.slice(0, 3),
+            },
+            interpretation: "This isn't a flaw. It's a predictable pattern you can design around.",
+            cost: topLoop.cost,
+            experiment: topLoop.experiment,
+            successMetric: topLoop.successMetric,
+            confidence: topLoop.confidence,
+          });
+        }
+
+        const upgrade = growthUpgrades[0] ?? null;
+        if (upgrade) {
+          out.push({
+            key: "insight:growth",
+            title: "Your growth signal",
+            observation: upgrade.title + ".",
+            evidence: { counts: upgrade.delta ? [upgrade.delta] : [], excerpts: [], pointers: [] },
+            interpretation: upgrade.line,
+            cost: "If you don't notice the upgrade, you keep using the old playbook.",
+            experiment: "Pick one prompt habit to lock in for 30 days (constraints, decision prompts, or v2 rule).",
+            successMetric: "More sessions that end with a win signal (solved/fixed/done).",
+            confidence: 0.62,
+          });
+        }
+
+        if (relationshipStyle.roles.length > 0) {
+          out.push({
+            key: "insight:relationship",
+            title: "Your AI relationship style",
+            observation: `You mostly treated AI like a ${relationshipStyle.primary.toLowerCase()}.`,
+            evidence: { counts: relationshipStyle.roles.slice(0, 2).map((r) => `${r.role}: ${r.pct}%`), excerpts: [], pointers: [] },
+            interpretation: "You don't outsource thinking. You outsource friction.",
+            cost: "When you ask for vibes, you get vibes back.",
+            experiment: "When it matters, ask for: assumptions → options → a recommendation → next steps.",
+            successMetric: `More convergent (decision) sessions without lowering resolved rate (${resolvedRate}%).`,
+            confidence: 0.58,
+          });
+        }
+
+        const boss = bossFights[0] ?? null;
+        if (boss && boss.chats >= 8) {
+          out.push({
+            key: "insight:boss",
+            title: "The boss fight you replayed",
+            observation: `${boss.title}. It kept showing up.`,
+            evidence: {
+              counts: [`${boss.chats.toLocaleString()} chats · peak: ${boss.peak ?? "unknown"}`],
+              excerpts: [boss.example],
+              pointers: boss.evidence.slice(0, 3),
+            },
+            interpretation: "You hit the same friction point often enough that it's worth a dedicated fix.",
+            cost: "You spend energy re-solving the same problem.",
+            experiment: "Write a one-page 'debug checklist' for your top boss fight, then reuse it every time.",
+            successMetric: "Fewer abandoned sessions in the months after the checklist.",
+            confidence: clamp01(0.45 + Math.min(boss.chats / 30, 0.45)),
+          });
+        }
+
+        return out.slice(0, 6);
+      })();
+
+      const actionPlan: RewindActionPlan = (() => {
+        const keepDoing: string[] = [];
+        const adjust: string[] = [];
+        const stopDoing: string[] = [];
+
+        if (behavior.stepByStepCount >= 10) keepDoing.push("Keep asking for step-by-step when you're stuck. It works for you.");
+        if (projects.length >= 3) keepDoing.push("Keep using AI as a co-builder. You ship more when you do.");
+        if (trips.tripCount >= 1) keepDoing.push("Keep using AI to plan logistics. You like fewer surprises.");
+        if (keepDoing.length < 3) keepDoing.push("Keep using AI as a second brain for quick momentum.");
+
+        const topLoop = loops[0] ?? null;
+        if (topLoop?.key === "start_friction") adjust.push("Add a 'v1 in 10 minutes' rule for anything you're starting.");
+        if (topLoop?.key === "decision_paralysis") adjust.push("Switch from options → decision prompts when it's time to commit.");
+        if (topLoop?.key === "reassurance") adjust.push("Trade reassurance for a tiny plan + one action for today.");
+        if (adjust.length < 3) adjust.push("End sessions with a next step you can do in under 20 minutes.");
+
+        if (behavior.quickQuestionCount >= 10) stopDoing.push('Stop calling them "quick questions." You and I both know.');
+        if (behavior.brokenCount >= 15) stopDoing.push("Stop brute-forcing when you're frustrated. Switch to hypotheses → checks → fixes.");
+        if (stopDoing.length < 3) stopDoing.push("Stop ending sessions mid-spiral. Ask for a crisp next step, then log off.");
+
+        const promptTemplates: Array<{ title: string; template: string }> = [
+          {
+            title: "Start a thing (fast)",
+            template:
+              "Goal: [what you want].\nConstraints: [time/budget/tools].\nAsk me 5 clarifying questions.\nThen give 3 approaches and pick 1.\nThen draft a v1 I can use in 10 minutes.",
+          },
+          {
+            title: "Make a decision",
+            template:
+              "I need to choose between A/B/C.\nMy constraints: [musts], [nice-to-haves].\nAsk up to 3 questions.\nThen pick 1 option and justify it.\nThen give the next 3 actions (20 minutes each).",
+          },
+          {
+            title: "Debug like a grown-up",
+            template:
+              "What I'm trying to do: ...\nWhat happened: ...\nWhat I expected: ...\nEnvironment: ...\nGive 3 hypotheses.\nFor each: how to test → how to fix.\nThen tell me which to try first.",
+          },
+          {
+            title: "Rewrite with constraints",
+            template:
+              "Rewrite this for: [audience].\nTone: [e.g., confident, warm, direct].\nConstraints: [length, bullets, no jargon].\nGive 3 variants and explain the differences in one line each.\nText: ...",
+          },
+          {
+            title: "Get unstuck (no pep talk)",
+            template:
+              "I'm stuck on: ...\nAsk me 5 questions to locate the real blocker.\nThen propose 2 experiments I can run today.\nEach experiment should take < 20 minutes.\nEnd with a one-line success metric.",
+          },
+        ];
+
+        return {
+          keepDoing: keepDoing.slice(0, 3),
+          adjust: adjust.slice(0, 3),
+          stopDoing: stopDoing.slice(0, 3),
+          promptTemplates,
+        };
+      })();
+
+      const useMap: RewindDeepDive["useMap"] = {
+        totalSessions,
+        avgSessionMins,
+        avgPromptsPerSession,
+        resolvedSessions,
+        abandonedSessions,
+        intents: dist(forensicIntentCounts, intentLabel),
+        domains: dist(forensicDomainCounts, domainLabel),
+        cognitiveModes: dist(forensicCognitiveModeCounts, cognitiveLabel),
+        tones: dist(forensicToneCounts, toneLabel),
+        helpTypes: dist(forensicHelpTypeCounts, helpLabel),
+        topOpeners,
+        topEndings,
+        ratios: { exploratorySessions, convergentSessions, line },
+      };
+
+      return {
+        useMap,
+        signaturePrompts: { openingMoves: signatureOpeningMoves, constraints },
+        loops,
+        relationshipStyle,
+        insights,
+        actionPlan,
+      };
+    })();
+
     const wrapped: RewindWrappedSummary = {
       archetype,
       hook,
@@ -3057,6 +4293,7 @@ export function createRewindAnalyzer(options?: {
       growthUpgrades,
       youVsYou,
       forecast,
+      deepDive,
       closingLine,
     };
 
@@ -3078,6 +4315,7 @@ export function createRewindAnalyzer(options?: {
       behavior,
       conversations,
       wrapped,
+      privacyScan,
     };
   };
 

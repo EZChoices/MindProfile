@@ -302,6 +302,24 @@ export function generateRewindBangers(
     });
   }
 
+  // One word you couldn't quit (can be personal, so only include when opted in).
+  if (includePersonalDetails && summary.topWord) {
+    const word = summary.topWord.trim();
+    if (word && word.length <= 24) {
+      const line1 = bySpice(spice, {
+        mild: `One word you couldn't quit: ${safeQuote(word)}.`,
+        spicy: `One word you couldn't quit: ${safeQuote(word)}.`,
+        savage: `One word you couldn't quit: ${safeQuote(word)}. It owned you.`,
+      });
+      add({
+        id: "topword",
+        category: "catchphrase",
+        line1,
+        score: 58 + scoreFromCount(word.length) + scoreFromLength(line1),
+      });
+    }
+  }
+
   // Growth upgrade.
   if (topUpgrade) {
     const line1 = bySpice(spice, {

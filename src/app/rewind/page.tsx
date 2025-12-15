@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { getOrCreateClientId } from "@/lib/clientId";
+import { anonymizeText } from "@/lib/anonymize";
 import type { RewindSummary } from "@/lib/rewind";
 import { analyzeRewindFileClient } from "@/lib/rewindFileClient";
 import type { RewindClientProgress } from "@/lib/rewindFileClient";
@@ -285,6 +286,8 @@ export default function RewindPage() {
   const [includeSpicyWords, setIncludeSpicyWords] = useState(false);
   const [includeExamples, setIncludeExamples] = useState(true);
   const [allowRedactedExcerpts, setAllowRedactedExcerpts] = useState(true);
+  const [maskNamesInExcerpts, setMaskNamesInExcerpts] = useState(false);
+  const [maskNumbersInExcerpts, setMaskNumbersInExcerpts] = useState(false);
   const [sharePersonalDetails, setSharePersonalDetails] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [sharePick, setSharePick] = useState(0);
@@ -375,7 +378,9 @@ export default function RewindPage() {
   const receiptBangers = bangerPack
     ? bangerPack.all
         .filter((b) =>
-          ["nickname", "whiplash", "politeness", "quick", "contradiction", "rage", "style", "rhythm"].includes(b.category),
+          ["nickname", "whiplash", "politeness", "quick", "contradiction", "rage", "style", "rhythm", "catchphrase"].includes(
+            b.category,
+          ),
         )
         .slice(0, 6)
     : [];
@@ -412,7 +417,7 @@ export default function RewindPage() {
       rewind.behavior.yellingMessageCount > 0;
 
     if (rewind.behavior.pleaseCount >= 50 && hasChaos) {
-      bullets.push(`${you} stayed polite… until it didn’t work.`);
+      bullets.push(`${you} stayed polite… Until it didn’t work.`);
     } else if (rewind.behavior.pleaseCount >= 50) {
       bullets.push(`${you} ran polite mode all year. Respectfully.`);
     } else if (hasChaos) {
@@ -425,9 +430,18 @@ export default function RewindPage() {
         includeExamples && allowRedactedExcerpts && topBuild.projectLabelPrivate
           ? topBuild.projectLabelPrivate
           : topBuild.projectLabel;
+      const built =
+        includeExamples && allowRedactedExcerpts && topBuild.whatYouBuiltPrivate
+          ? topBuild.whatYouBuiltPrivate
+          : topBuild.whatYouBuilt;
       bullets.push(
-        `${you} built ${rewind.wrapped.projects.length.toLocaleString()} things. The loudest era: ${label}.`,
+        `${you} built ${rewind.wrapped.projects.length.toLocaleString()} things. Loudest era: ${label}. ${built}`,
       );
+    }
+
+    const topBoss = rewind.wrapped.bossFights[0] ?? null;
+    if (topBoss && topBoss.chats >= 6) {
+      bullets.push(`${you} fought ${topBoss.example} in ${topBoss.chats.toLocaleString()} chats.`);
     }
 
     const topTrip = rewind.wrapped.trips.topTrips[0] ?? null;
@@ -444,6 +458,10 @@ export default function RewindPage() {
       bullets.push(`${you} asked me about ${foodLabel}. Priorities.`);
     }
 
+    if (rewind.topWord) {
+      bullets.push(`${you} couldn’t quit one word: "${rewind.topWord}".`);
+    }
+
     if (rewind.promptLengthChangePercent != null && Math.abs(rewind.promptLengthChangePercent) >= 10) {
       bullets.push(
         rewind.promptLengthChangePercent < 0
@@ -452,8 +470,16 @@ export default function RewindPage() {
       );
     }
 
-    return bullets.slice(0, 4);
+    return bullets.slice(0, 6);
   })();
+
+  const formatExcerpt = (text: string | null) => {
+    if (!text) return null;
+    let out = text;
+    out = anonymizeText(out, { redactNames: maskNamesInExcerpts }).sanitized;
+    if (maskNumbersInExcerpts) out = out.replace(/\b\d{4,}\b/g, "[number]");
+    return out;
+  };
 
   const buildShareText = (insight: ShareInsight) =>
     insight.subhead ? `${insight.headline}\n${insight.subhead}` : insight.headline;
@@ -521,6 +547,8 @@ export default function RewindPage() {
     setIncludeSpicyWords(false);
     setIncludeExamples(true);
     setAllowRedactedExcerpts(true);
+    setMaskNamesInExcerpts(false);
+    setMaskNumbersInExcerpts(false);
     setDismissedHighlights([]);
     setDismissedRabbitHoles([]);
   };
@@ -600,6 +628,8 @@ export default function RewindPage() {
     setIncludeSpicyWords(false);
     setIncludeExamples(true);
     setAllowRedactedExcerpts(true);
+    setMaskNamesInExcerpts(false);
+    setMaskNumbersInExcerpts(false);
     setDismissedHighlights([]);
     setDismissedRabbitHoles([]);
   };
@@ -908,6 +938,28 @@ export default function RewindPage() {
                       />
                       Show small excerpts (private)
                     </label>
+                    {allowRedactedExcerpts && (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={maskNamesInExcerpts}
+                          onChange={(e) => setMaskNamesInExcerpts(e.currentTarget.checked)}
+                          className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                        />
+                        Mask names in excerpts
+                      </label>
+                    )}
+                    {allowRedactedExcerpts && (
+                      <label className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={maskNumbersInExcerpts}
+                          onChange={(e) => setMaskNumbersInExcerpts(e.currentTarget.checked)}
+                          className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                        />
+                        Mask numbers in excerpts
+                      </label>
+                    )}
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -920,7 +972,9 @@ export default function RewindPage() {
                     <p className="muted text-[11px] text-slate-200">
                       {sharePersonalDetails
                         ? "Sharing can include personal details. Double-check before posting."
-                        : "Sharing stays safe by default. No raw prompts."}
+                        : allowRedactedExcerpts && !maskNamesInExcerpts
+                          ? "Excerpts can include names/places (private mode). Toggle “Mask names” if you want extra privacy."
+                          : "Sharing stays safe by default. No raw prompts."}
                     </p>
                   </div>
                 </div>
@@ -988,6 +1042,355 @@ export default function RewindPage() {
               </div>
             )}
 
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Privacy scan</div>
+              <p className="muted mt-3 text-sm text-slate-100">
+                We scanned for obvious sensitive bits. Excerpts are masked based on your toggles.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2 text-xs text-slate-200">
+                {(
+                  [
+                    ["emails", rewind.privacyScan.emails],
+                    ["phones", rewind.privacyScan.phones],
+                    ["urls", rewind.privacyScan.urls],
+                    ["handles", rewind.privacyScan.handles],
+                    ["ids", rewind.privacyScan.ids],
+                    ["secrets", rewind.privacyScan.secrets],
+                    ["cards", rewind.privacyScan.cards],
+                    ["names", rewind.privacyScan.names],
+                    ["passwords", rewind.privacyScan.passwords],
+                    ["addresses", rewind.privacyScan.addresses],
+                  ] as const
+                )
+                  .filter(([, count]) => count > 0)
+                  .map(([label, count]) => (
+                    <span
+                      key={label}
+                      className="rounded-full border border-white/10 bg-white/5 px-3 py-1"
+                    >
+                      {label}: <b className="text-slate-100">{count.toLocaleString()}</b>
+                    </span>
+                  ))}
+                {Object.values(rewind.privacyScan).every((v) => v === 0) && (
+                  <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1">
+                    No obvious PII detected in this window.
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Your AI use map</div>
+              <p className="muted mt-3 text-sm text-slate-100">What happened. Before we interpret it.</p>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Sessions</div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {rewind.wrapped.deepDive.useMap.totalSessions.toLocaleString()}
+                  </div>
+                  <p className="muted mt-1 text-xs text-slate-200">
+                    Avg session:{" "}
+                    {rewind.wrapped.deepDive.useMap.avgSessionMins != null
+                      ? `${rewind.wrapped.deepDive.useMap.avgSessionMins} min`
+                      : "-"}
+                    . Avg prompts:{" "}
+                    {rewind.wrapped.deepDive.useMap.avgPromptsPerSession != null
+                      ? rewind.wrapped.deepDive.useMap.avgPromptsPerSession.toLocaleString()
+                      : "-"}
+                    .
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Endings</div>
+                  <div className="mt-2 text-lg font-semibold text-white">
+                    {rewind.wrapped.deepDive.useMap.resolvedSessions.toLocaleString()} resolved
+                  </div>
+                  <p className="muted mt-1 text-xs text-slate-200">
+                    {rewind.wrapped.deepDive.useMap.abandonedSessions.toLocaleString()} abandoned.
+                  </p>
+                </div>
+              </div>
+
+              <p className="muted mt-4 text-sm text-slate-100">{rewind.wrapped.deepDive.useMap.ratios.line}</p>
+
+              <div className="mt-6 grid gap-5 md:grid-cols-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">By intent</div>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                    {rewind.wrapped.deepDive.useMap.intents.slice(0, 6).map((row) => (
+                      <li key={row.key} className="flex items-center justify-between gap-3">
+                        <span>{row.label}</span>
+                        <span className="muted text-xs text-slate-200">{row.pct}%</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">By domain</div>
+                  <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                    {rewind.wrapped.deepDive.useMap.domains.slice(0, 6).map((row) => (
+                      <li key={row.key} className="flex items-center justify-between gap-3">
+                        <span>{row.label}</span>
+                        <span className="muted text-xs text-slate-200">{row.pct}%</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {rewind.wrapped.deepDive.useMap.topOpeners.length > 0 && (
+                <div className="mt-6">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">Opening moves</div>
+                  <ul className="mt-3 space-y-3 text-sm text-slate-100">
+                    {rewind.wrapped.deepDive.useMap.topOpeners.slice(0, 3).map((o) => (
+                      <li key={o.label}>
+                        <b>{o.label}</b>{" "}
+                        <span className="muted text-xs text-slate-200">({o.count.toLocaleString()} sessions)</span>
+                        {includeExamples && allowRedactedExcerpts && o.excerpt && (
+                          <div className="muted mt-1 text-xs text-slate-200">"{formatExcerpt(o.excerpt)}"</div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Your AI relationship style</div>
+              <p className="muted mt-3 text-sm text-slate-100">
+                {rewind.wrapped.deepDive.relationshipStyle.line}
+              </p>
+              <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <div className="text-xs uppercase tracking-[0.2em] text-slate-200">Primary role</div>
+                <div className="mt-2 text-lg font-semibold text-white">
+                  {rewind.wrapped.deepDive.relationshipStyle.primary}
+                </div>
+                {rewind.wrapped.deepDive.relationshipStyle.roles.length > 0 && (
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-200">
+                    {rewind.wrapped.deepDive.relationshipStyle.roles.slice(0, 4).map((r) => (
+                      <span
+                        key={r.role}
+                        className="rounded-full border border-white/10 bg-white/5 px-3 py-1"
+                      >
+                        {r.role}: <b className="text-slate-100">{r.pct}%</b>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {rewind.wrapped.deepDive.signaturePrompts.openingMoves.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Your signature prompts</div>
+                <p className="muted mt-3 text-sm text-slate-100">Identity, but with receipts.</p>
+
+                <div className="mt-5 grid gap-6 md:grid-cols-2">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+                      Common openers
+                    </div>
+                    <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                      {rewind.wrapped.deepDive.signaturePrompts.openingMoves.slice(0, 8).map((row) => (
+                        <li key={row.phrase} className="flex items-center justify-between gap-3">
+                          <span>"{row.phrase}"</span>
+                          <span className="muted text-xs text-slate-200">{row.count.toLocaleString()}x</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+                      How you like help
+                    </div>
+                    <ul className="mt-3 space-y-2 text-sm text-slate-100">
+                      {rewind.wrapped.deepDive.signaturePrompts.constraints.slice(0, 4).map((c) => (
+                        <li key={c.label} className="leading-relaxed">
+                          <b>{c.label}.</b> {c.line}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {rewind.wrapped.deepDive.loops.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Loop detector</div>
+                <p className="muted mt-3 text-sm text-slate-100">
+                  Where you get stuck - and what to try next.
+                </p>
+
+                <ul className="mt-5 space-y-4 text-sm text-slate-100">
+                  {rewind.wrapped.deepDive.loops.map((loop) => (
+                    <li key={loop.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="text-base font-semibold text-white">{loop.title}</div>
+                          <p className="muted mt-1 text-xs text-slate-200">{loop.observation}</p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-lg font-semibold text-white">
+                            {Math.round(loop.confidence * 100)}%
+                          </div>
+                          <p className="muted mt-1 text-xs text-slate-200">confidence</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid gap-3 text-sm text-slate-100">
+                        <p>
+                          <span className="muted text-slate-200">Cost:</span> {loop.cost}
+                        </p>
+                        <p>
+                          <span className="muted text-slate-200">Experiment:</span> {loop.experiment}
+                        </p>
+                        <p>
+                          <span className="muted text-slate-200">Metric:</span> {loop.successMetric}
+                        </p>
+                      </div>
+                      {includeExamples && allowRedactedExcerpts && loop.evidence.length > 0 && (
+                        <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                            Evidence (private)
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                            {loop.evidence.slice(0, 3).map((e, idx) => (
+                              <li key={`${loop.key}-ev-${idx}`}>
+                                {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {rewind.wrapped.deepDive.insights.length > 0 && (
+              <div className="glass card-border rounded-3xl p-6 sm:p-8">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Insights with receipts</div>
+                <p className="muted mt-3 text-sm text-slate-100">Observation → evidence → meaning → experiment.</p>
+
+                <ul className="mt-5 space-y-4 text-sm text-slate-100">
+                  {rewind.wrapped.deepDive.insights.map((insight) => (
+                    <li key={insight.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="text-base font-semibold text-white">{insight.title}</div>
+                          <p className="muted mt-1 text-xs text-slate-200">
+                            Confidence: {Math.round(insight.confidence * 100)}%
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid gap-3 text-sm text-slate-100">
+                        <p>
+                          <b>Observation:</b> {insight.observation}
+                        </p>
+                        {insight.evidence.counts.length > 0 && (
+                          <div>
+                            <b>Evidence:</b>
+                            <ul className="mt-2 list-inside list-disc space-y-1 text-sm text-slate-100">
+                              {insight.evidence.counts.slice(0, 3).map((line) => (
+                                <li key={line}>{line}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {includeExamples && allowRedactedExcerpts && insight.evidence.excerpts.length > 0 && (
+                          <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-xs text-slate-200">
+                            “{formatExcerpt(insight.evidence.excerpts[0])}”
+                          </div>
+                        )}
+                        <p>
+                          <b>Interpretation:</b> {insight.interpretation}
+                        </p>
+                        <p>
+                          <b>Cost:</b> {insight.cost}
+                        </p>
+                        <p>
+                          <b>Experiment:</b> {insight.experiment}
+                        </p>
+                        <p>
+                          <b>Success metric:</b> {insight.successMetric}
+                        </p>
+                      </div>
+
+                      {includeExamples && allowRedactedExcerpts && insight.evidence.pointers.length > 0 && (
+                        <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                            Evidence pointers (private)
+                          </summary>
+                          <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                            {insight.evidence.pointers.slice(0, 3).map((e, idx) => (
+                              <li key={`${insight.key}-ptr-${idx}`}>
+                                {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="glass card-border rounded-3xl p-6 sm:p-8">
+              <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Action plan</div>
+              <p className="muted mt-3 text-sm text-slate-100">The part you actually keep.</p>
+
+              <div className="mt-5 grid gap-6 md:grid-cols-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">Keep doing</div>
+                  <ul className="mt-3 list-inside list-disc space-y-2 text-sm text-slate-100">
+                    {rewind.wrapped.deepDive.actionPlan.keepDoing.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">Adjust</div>
+                  <ul className="mt-3 list-inside list-disc space-y-2 text-sm text-slate-100">
+                    {rewind.wrapped.deepDive.actionPlan.adjust.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">Stop doing</div>
+                  <ul className="mt-3 list-inside list-disc space-y-2 text-sm text-slate-100">
+                    {rewind.wrapped.deepDive.actionPlan.stopDoing.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {rewind.wrapped.deepDive.actionPlan.promptTemplates.length > 0 && (
+                <div className="mt-6">
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">
+                    Prompt templates
+                  </div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    {rewind.wrapped.deepDive.actionPlan.promptTemplates.slice(0, 5).map((t) => (
+                      <div key={t.title} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="text-sm font-semibold text-white">{t.title}</div>
+                        <pre className="muted mt-3 whitespace-pre-wrap break-words text-xs text-slate-200">
+                          {t.template}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
             {rewind.wrapped.trips.tripCount > 0 && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Trips</div>
@@ -1009,7 +1412,7 @@ export default function RewindPage() {
                       </div>
                       <p className="mt-2 text-sm text-slate-100">{t.line}</p>
                       {includeExamples && allowRedactedExcerpts && t.excerpt && (
-                        <p className="muted mt-2 text-xs text-slate-200">"{t.excerpt}"</p>
+                        <p className="muted mt-2 text-xs text-slate-200">"{formatExcerpt(t.excerpt)}"</p>
                       )}
                       {includeExamples && allowRedactedExcerpts && t.evidence.length > 0 && (
                         <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1019,7 +1422,7 @@ export default function RewindPage() {
                           <ul className="mt-2 space-y-1 text-xs text-slate-200">
                             {t.evidence.slice(0, 3).map((e, idx) => (
                               <li key={`${t.key}-ev-${idx}`}>
-                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                                {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                               </li>
                             ))}
                           </ul>
@@ -1057,7 +1460,7 @@ export default function RewindPage() {
                         </div>
                         <p className="mt-2 text-sm text-slate-100">{h.line}</p>
                         {allowRedactedExcerpts && h.excerpt && (
-                          <p className="muted mt-2 text-xs text-slate-200">"{h.excerpt}"</p>
+                          <p className="muted mt-2 text-xs text-slate-200">"{formatExcerpt(h.excerpt)}"</p>
                         )}
                         {allowRedactedExcerpts && h.evidence.length > 0 && (
                           <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1067,7 +1470,7 @@ export default function RewindPage() {
                             <ul className="mt-2 space-y-1 text-xs text-slate-200">
                               {h.evidence.slice(0, 3).map((e, idx) => (
                                 <li key={`${h.key}-ev-${idx}`}>
-                                  {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                                  {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                                 </li>
                               ))}
                             </ul>
@@ -1103,7 +1506,7 @@ export default function RewindPage() {
                           </div>
                           <p className="mt-2 text-sm text-slate-100">{h.line}</p>
                           {allowRedactedExcerpts && h.excerpt && (
-                            <p className="muted mt-2 text-xs text-slate-200">"{h.excerpt}"</p>
+                            <p className="muted mt-2 text-xs text-slate-200">"{formatExcerpt(h.excerpt)}"</p>
                           )}
                         </div>
                       ))}
@@ -1144,7 +1547,7 @@ export default function RewindPage() {
                       </div>
                       <p className="mt-2 text-sm text-slate-100">{hole.why}</p>
                       {includeExamples && allowRedactedExcerpts && hole.excerpt && (
-                        <p className="muted mt-2 text-xs text-slate-200">"{hole.excerpt}"</p>
+                        <p className="muted mt-2 text-xs text-slate-200">"{formatExcerpt(hole.excerpt)}"</p>
                       )}
                       {includeExamples && allowRedactedExcerpts && hole.evidence.length > 0 && (
                         <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1154,7 +1557,7 @@ export default function RewindPage() {
                           <ul className="mt-2 space-y-1 text-xs text-slate-200">
                             {hole.evidence.slice(0, 3).map((e, idx) => (
                               <li key={`${hole.key}-ev-${idx}`}>
-                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                                {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                               </li>
                             ))}
                           </ul>
@@ -1228,7 +1631,7 @@ export default function RewindPage() {
                           <ul className="mt-2 space-y-1 text-xs text-slate-200">
                             {project.evidence.slice(0, 3).map((e, idx2) => (
                               <li key={`${project.key}-ev-${idx2}`}>
-                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                                {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                               </li>
                             ))}
                           </ul>
@@ -1272,7 +1675,7 @@ export default function RewindPage() {
                           <ul className="mt-2 space-y-1 text-xs text-slate-200">
                             {boss.evidence.slice(0, 3).map((e, idx) => (
                               <li key={`${boss.key}-ev-${idx}`}>
-                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                                {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                               </li>
                             ))}
                           </ul>
@@ -1309,7 +1712,7 @@ export default function RewindPage() {
                       </div>
                       <p className="mt-2 text-sm text-slate-100">{m.line}</p>
                       {includeExamples && allowRedactedExcerpts && m.excerpt && (
-                        <p className="muted mt-2 text-xs text-slate-200">"{m.excerpt}"</p>
+                        <p className="muted mt-2 text-xs text-slate-200">"{formatExcerpt(m.excerpt)}"</p>
                       )}
                       {includeExamples && allowRedactedExcerpts && m.evidence.length > 0 && (
                         <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
@@ -1319,7 +1722,7 @@ export default function RewindPage() {
                           <ul className="mt-2 space-y-1 text-xs text-slate-200">
                             {m.evidence.slice(0, 3).map((e, idx) => (
                               <li key={`${m.key}-ev-${idx}`}>
-                                {(e.startDay ?? e.endDay ?? "date")} · {e.snippets[0] ?? "signal"}
+                                {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                               </li>
                             ))}
                           </ul>
