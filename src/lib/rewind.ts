@@ -765,11 +765,29 @@ const accountabilityCuePattern = /\b(accountability|hold me accountable|check in
 const selfStatementCuePattern =
   /\b(i'm|i am|i feel|i keep|i can'?t|i want|i need|i have|my|we're|we are|we keep)\b/i;
 
+const FIRST_PERSON_CUE_PATTERN = /\b(i|i'm|im|i am|my|me|we|we're|we are|our|us)\b/i;
+const EXAMPLE_CUE_PATTERN = /\b(example|for example|for instance|e\.g\.|like this|say something like)\b/i;
+const PROMPT_META_CUE_PATTERN = /\b(prompt|system prompt|template|instruction)\b/i;
+
 const splitSentences = (text: string) =>
   text
     .split(/[\n.!?]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+
+const findSentenceWithNeedle = (text: string, needleLower: string) => {
+  if (!text) return "";
+  const sentences = splitSentences(text);
+  const match = sentences.find((s) => s.toLowerCase().includes(needleLower));
+  return match ?? text;
+};
+
+const isExampleContext = (sentenceLower: string) => {
+  if (!sentenceLower) return false;
+  if (EXAMPLE_CUE_PATTERN.test(sentenceLower)) return true;
+  if (PROMPT_META_CUE_PATTERN.test(sentenceLower) && !FIRST_PERSON_CUE_PATTERN.test(sentenceLower)) return true;
+  return false;
+};
 
 const maskObviousSecrets = (text: string) =>
   text
@@ -1333,6 +1351,7 @@ export function createRewindAnalyzer(options?: {
       chats: number;
       messages: number;
       strong: number;
+      days: Set<string>;
       months: Map<string, number>;
       evidence: Map<string, RewindEvidencePointer>;
     }
@@ -1896,7 +1915,7 @@ export function createRewindAnalyzer(options?: {
         if (match?.[0]) recordConversationEvidence(match[0]);
       }
 
-      if (entityText && TRAVEL_CUE_PATTERN.test(entityText)) {
+      if (!isTechnical && entityText && TRAVEL_CUE_PATTERN.test(entityText)) {
         travelMessageHits += 1;
         if (TRAVEL_STRONG_PATTERN.test(entityText)) travelStrongHits += 1;
         const destMatch = extractTravelDestinationMatch(entityText);
@@ -1915,14 +1934,21 @@ export function createRewindAnalyzer(options?: {
         if (!TRANSLATION_CUE_PATTERN.test(entityLower)) {
           const languageMatch = LANGUAGE_LEARN_PATTERN.exec(entityLower) ?? LANGUAGE_PRACTICE_PATTERN.exec(entityLower);
           if (languageMatch?.[1]) {
+            const sentence = findSentenceWithNeedle(entityText, languageMatch[0].toLowerCase());
+            const sentenceLower = sentence.toLowerCase();
+            if (isExampleContext(sentenceLower)) {
+              // Avoid false positives from meta-prompts ("example prompt to learn Spanish", etc.).
+              // If it's real, it will show up elsewhere with clearer personal signals.
+              continue;
+            }
             const lang = languageMatch[1].toLowerCase();
             const label = lang.charAt(0).toUpperCase() + lang.slice(1);
             recordLifeCandidate({
               type: "language",
               labelSafe: label,
               labelPrivate: label,
-              snippet: languageMatch[0],
-              strong: true,
+              snippet: sentence,
+              strong: FIRST_PERSON_CUE_PATTERN.test(sentenceLower),
             });
           }
         }
@@ -1932,11 +1958,16 @@ export function createRewindAnalyzer(options?: {
             pat.lastIndex = 0;
             const match = pat.exec(entityLower);
             if (!match) continue;
+            const sentence = findSentenceWithNeedle(entityText, match[0].toLowerCase());
+            const sentenceLower = sentence.toLowerCase();
+            if (isExampleContext(sentenceLower)) {
+              break;
+            }
             const activityRaw = match[2] ?? match[1] ?? match[0];
             const activity = activityRaw.toLowerCase();
             const label = activity.charAt(0).toUpperCase() + activity.slice(1).replace(/\bworkouts\b/i, "Workout");
             const strong = /\b(started|starting|getting into|training)\b/i.test(match[0]);
-            recordLifeCandidate({ type: "fitness", labelSafe: label, labelPrivate: label, snippet: match[0], strong });
+            recordLifeCandidate({ type: "fitness", labelSafe: label, labelPrivate: label, snippet: sentence, strong });
             break;
           }
         }
@@ -1945,12 +1976,17 @@ export function createRewindAnalyzer(options?: {
           pat.lastIndex = 0;
           const match = pat.exec(entityLower);
           if (!match) continue;
+          const sentence = findSentenceWithNeedle(entityText, match[0].toLowerCase());
+          const sentenceLower = sentence.toLowerCase();
+          if (isExampleContext(sentenceLower)) {
+            break;
+          }
           const nounRaw = match[2] ?? match[1] ?? match[0];
           const noun = compressWhitespace(nounRaw.toLowerCase().replace(/[^a-z0-9'\-\s]/g, " "));
           const limited = noun.split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
           const label = (limited || noun).charAt(0).toUpperCase() + (limited || noun).slice(1).replace(/\brecipes\b/i, "Recipes");
           const strong = /\b(trying|tried|started|starting|learning)\b/i.test(match[0]);
-          recordLifeCandidate({ type: "food", labelSafe: label, labelPrivate: label, snippet: match[0], strong });
+          recordLifeCandidate({ type: "food", labelSafe: label, labelPrivate: label, snippet: sentence, strong });
           break;
         }
 
@@ -1958,10 +1994,15 @@ export function createRewindAnalyzer(options?: {
           pat.lastIndex = 0;
           const match = pat.exec(entityLower);
           if (!match) continue;
+          const sentence = findSentenceWithNeedle(entityText, match[0].toLowerCase());
+          const sentenceLower = sentence.toLowerCase();
+          if (isExampleContext(sentenceLower)) {
+            break;
+          }
           const token = match[0].toLowerCase();
           const label =
             token.includes("job offer") ? "Job offer" : token.includes("offer letter") ? "Offer letter" : token.includes("resume") || token.includes("cv") ? "Resume" : token.includes("salary") ? "Salary" : "Interview";
-          recordLifeCandidate({ type: "career", labelSafe: label, labelPrivate: label, snippet: match[0], strong: true });
+          recordLifeCandidate({ type: "career", labelSafe: label, labelPrivate: label, snippet: sentence, strong: true });
           break;
         }
 
@@ -1969,9 +2010,14 @@ export function createRewindAnalyzer(options?: {
           pat.lastIndex = 0;
           const match = pat.exec(entityLower);
           if (!match) continue;
+          const sentence = findSentenceWithNeedle(entityText, match[0].toLowerCase());
+          const sentenceLower = sentence.toLowerCase();
+          if (isExampleContext(sentenceLower)) {
+            break;
+          }
           const token = match[0].toLowerCase();
           const label = token.includes("apartment") ? "Apartment hunt" : token.includes("lease") ? "Lease" : token.includes("mortgage") ? "Mortgage" : "Moving";
-          recordLifeCandidate({ type: "life", labelSafe: label, labelPrivate: label, snippet: match[0], strong: true });
+          recordLifeCandidate({ type: "life", labelSafe: label, labelPrivate: label, snippet: sentence, strong: true });
           break;
         }
       }
@@ -2248,6 +2294,7 @@ export function createRewindAnalyzer(options?: {
           chats: 0,
           messages: 0,
           strong: 0,
+          days: new Set<string>(),
           months: new Map<string, number>(),
           evidence: new Map<string, RewindEvidencePointer>(),
         };
@@ -2255,6 +2302,8 @@ export function createRewindAnalyzer(options?: {
       current.chats += 1;
       current.messages += candidate.messageHits;
       current.strong += candidate.strongHits;
+      if (startDay) current.days.add(startDay);
+      if (endDay) current.days.add(endDay);
       if (monthKey) current.months.set(monthKey, (current.months.get(monthKey) ?? 0) + 1);
       if (!current.labelPrivate && candidate.labelPrivate) current.labelPrivate = candidate.labelPrivate;
 
@@ -2640,9 +2689,13 @@ export function createRewindAnalyzer(options?: {
       >();
 
       for (const conv of candidates) {
-        const projectKey = conv.themeKey ?? conv.topicKey ?? (conv.intent === "debug" ? "debug" : conv.intent);
-        const stackHint = conv.stack.find((t) => !["Git", "GitHub", "Windows", "Linux", "macOS", "VS Code"].includes(t)) ?? "general";
-        const clusterKey = `${projectKey}:${stackHint}`;
+        let projectKey = conv.themeKey ?? conv.topicKey ?? (conv.intent === "debug" ? "debug" : conv.intent);
+        // Normalize near-duplicates so builds don't split into clones.
+        if (projectKey === "plan") projectKey = "planning";
+        if (projectKey === "learn") projectKey = "learning";
+        if (projectKey === "write") projectKey = "writing";
+        if (projectKey === "build") projectKey = "coding";
+        const clusterKey = projectKey;
 
         const current =
           clusters.get(clusterKey) ?? {
@@ -2875,11 +2928,34 @@ export function createRewindAnalyzer(options?: {
           })();
 
           const signatureShort = signature ? makeSnippet(signature, { maxWords: 7, maxChars: 64 }) : null;
-          const labelPrivate = signatureShort ? `${labelSafe} - ${signatureShort}` : labelPrivateBase;
+          const labelPrivate = signatureShort ?? labelPrivateBase;
 
           const artifactOverride = inferArtifactOverride((signature ?? "").toLowerCase(), stack);
           const whatSafe = whatBuilt(cluster.projectKey, topDeliverable, stackTop, artifactOverride);
           const whatPrivate = (() => {
+            const verbHint = (() => {
+              if (!signature) return null;
+              const cleaned = compressWhitespace(signature.replace(/[“”"]/g, ""));
+              const lower = cleaned.toLowerCase();
+              let fragment: string | null = null;
+              if (lower.startsWith("how to ")) fragment = cleaned.slice(7);
+              else if (lower.startsWith("help me ")) fragment = cleaned.slice(8);
+              else if (lower.startsWith("can you ")) fragment = cleaned.slice(8);
+              else {
+                const match = /\bto\s+([a-z][^?!.]{2,120})/i.exec(cleaned);
+                fragment = match?.[1] ?? null;
+              }
+              if (!fragment) return null;
+              const clipped = makeSnippet(fragment, { maxWords: 10, maxChars: 80 });
+              return clipped ? clipped.replace(/[.?!]+$/g, "") : null;
+            })();
+
+            if (verbHint) {
+              const noun = artifactNoun(cluster.projectKey, topDeliverable, artifactOverride);
+              const suffix = verbHint.toLowerCase().startsWith("to ") ? verbHint : `to ${verbHint}`;
+              return `${noun} ${suffix}.`;
+            }
+
             if (!stackPair) return whatSafe;
             if (cluster.projectKey === "automation") return `An automation to connect ${stackPair}.`;
             if (cluster.projectKey === "api") return `An integration to connect ${stackPair}.`;
@@ -3472,9 +3548,25 @@ export function createRewindAnalyzer(options?: {
       };
 
       const candidates = Array.from(lifeHighlightAccumulators.values()).filter((c) => {
-        if (c.type === "language") return c.messages >= 3;
-        if (c.type === "fitness") return c.messages >= 3;
-        return c.chats >= 2 || c.messages >= 3;
+        const dayCount = c.days.size;
+        const hasSpread = c.chats >= 2 || dayCount >= 2;
+
+        // Truth-first gating: a single keyword in one chat should never become a "life highlight".
+        if (c.type === "language") {
+          // Language mentions are especially prone to false positives from meta-prompts/examples.
+          return hasSpread && c.messages >= 3 && c.strong >= 2;
+        }
+
+        if (c.type === "fitness") {
+          return hasSpread && c.messages >= 3 && c.strong >= 1;
+        }
+
+        if (c.type === "food") {
+          return hasSpread && c.messages >= 3 && c.strong >= 1;
+        }
+
+        // Career / life ops: still require repetition + some spread.
+        return hasSpread && (c.chats >= 2 || c.messages >= 4) && c.strong >= 1;
       });
 
       const out: RewindWrappedSummary["lifeHighlights"] = [];
@@ -3484,10 +3576,13 @@ export function createRewindAnalyzer(options?: {
         if (c.messages >= 3) confidence += 0.2;
         if (c.strong >= 1) confidence += 0.15;
         if (c.strong >= 3) confidence += 0.1;
+        if (c.days.size >= 2) confidence += 0.1;
+        if (c.days.size >= 4) confidence += 0.05;
         if (c.chats >= 4) confidence += 0.1;
         confidence = clamp01(confidence);
         let level: "high" | "medium" | "low" = confidence >= 0.75 ? "high" : confidence >= 0.6 ? "medium" : "low";
         if (level === "high" && c.strong === 0) level = "medium";
+        if (c.days.size <= 1 && level === "high") level = "medium";
 
         const month = peakMonthLabel(c.months);
         const evidence = Array.from(c.evidence.values())

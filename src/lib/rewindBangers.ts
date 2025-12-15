@@ -201,13 +201,13 @@ export function generateRewindBangers(
     const topBuildLabel = topProject
       ? includePersonalDetails
         ? topProject.projectLabelPrivate ?? topProject.projectLabel
-        : topProject.projectLabel
+        : topProject.whatYouBuilt
       : null;
     add({
       id: "projects",
       category: "projects",
       line1,
-      line2: topBuildLabel ? `Top build: ${topBuildLabel}.` : undefined,
+      line2: topBuildLabel ? `Top build: ${topBuildLabel.replace(/[.?!]+$/g, "")}.` : undefined,
       score: 88 + scoreFromCount(projectCount) + scoreFromLength(line1),
     });
   }
