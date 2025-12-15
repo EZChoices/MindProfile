@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Profile, SourceMode, Tier } from "@/types/profile";
 import { ProfileFeedback } from "@/components/ProfileFeedback";
 import type { MindCard } from "@/types/mindCard";
@@ -75,7 +75,6 @@ const ShareLinkHelper = () => {
 
 export default function AnalyzePage() {
   const [mode, setMode] = useState<Mode>("text");
-  const [shareUrl, setShareUrl] = useState("");
   const [shareLinks, setShareLinks] = useState<string[]>([""]);
   const [pastedText, setPastedText] = useState("");
   const [screenshotFiles, setScreenshotFiles] = useState<File[]>([]);
@@ -93,6 +92,79 @@ export default function AnalyzePage() {
 
   const formatReceipt = (text: string) =>
     maskNamesInReceipts ? anonymizeText(text).sanitized : text;
+
+  const parsePreview = useMemo(() => {
+    if (mode !== "text") return null;
+    const raw = pastedText.trim();
+    if (!raw) return null;
+
+    const normalizeTurnWhitespace = (text: string) =>
+      text
+        .replace(/\r\n/g, "\n")
+        .replace(/[ \t]+/g, " ")
+        .replace(/[ \t]*\n[ \t]*/g, "\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+    const lines = raw.replace(/\r\n/g, "\n").split("\n");
+    const turns: Array<{ role: "user" | "assistant"; text: string }> = [];
+
+    let currentRole: "user" | "assistant" | null = null;
+    let buffer: string[] = [];
+    let sawRoleMarker = false;
+
+    const startsUser = (line: string) => /^\s*(user|human)\s*:/i.test(line);
+    const startsAssistant = (line: string) => /^\s*(assistant|ai|chatgpt|claude|gemini)\s*:/i.test(line);
+    const stripPrefix = (line: string) => line.replace(/^\s*[^:]{2,20}:\s*/i, "");
+
+    const flush = () => {
+      if (!currentRole) return;
+      const text = buffer.join("\n").trim();
+      buffer = [];
+      if (!text) return;
+      turns.push({ role: currentRole, text });
+    };
+
+    for (const line of lines) {
+      if (startsUser(line)) {
+        sawRoleMarker = true;
+        flush();
+        currentRole = "user";
+        buffer.push(stripPrefix(line));
+        continue;
+      }
+      if (startsAssistant(line)) {
+        sawRoleMarker = true;
+        flush();
+        currentRole = "assistant";
+        buffer.push(stripPrefix(line));
+        continue;
+      }
+      if (!currentRole) currentRole = "user";
+      buffer.push(line);
+    }
+    flush();
+
+    const userTurns = turns
+      .filter((t) => t.role === "user")
+      .map((t, idx) => ({
+        id: `U${idx + 1}`,
+        text: normalizeTurnWhitespace(t.text),
+      }));
+
+    const fallback = normalizeTurnWhitespace(raw);
+    const finalTurns =
+      userTurns.length > 0 ? userTurns : fallback.length ? [{ id: "U1", text: fallback }] : [];
+
+    const excerpt = (text: string, maxChars = 140) =>
+      text.length <= maxChars ? text : `${text.slice(0, maxChars - 1).trimEnd()}…`;
+
+    return {
+      hasRoleMarkers: sawRoleMarker,
+      userTurnCount: finalTurns.length,
+      turns: finalTurns.slice(0, 10).map((t) => ({ ...t, text: excerpt(t.text) })),
+    };
+  }, [mode, pastedText]);
 
   const handleScreenshotSelect = (files: FileList | null) => {
     const next = Array.from(files ?? []).slice(0, 5);
@@ -115,7 +187,6 @@ export default function AnalyzePage() {
     setMindCard(null);
 
     const trimmedText = pastedText.trim();
-    const trimmedUrl = shareUrl.trim();
     const clientId = getOrCreateClientId();
 
     if (mode === "text") {
@@ -329,6 +400,36 @@ export default function AnalyzePage() {
                   onChange={(e) => setPastedText(e.target.value)}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-emerald-300/60"
                 />
+                {parsePreview && (
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-200">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
+                        Parse preview
+                      </div>
+                      <div className="text-[11px] text-slate-300">
+                        We found{" "}
+                        <span className="text-slate-100">
+                          {parsePreview.userTurnCount}
+                        </span>{" "}
+                        user turn{parsePreview.userTurnCount === 1 ? "" : "s"}.
+                      </div>
+                    </div>
+                    {!parsePreview.hasRoleMarkers && (
+                      <div className="mt-2 rounded-xl border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-100">
+                        No role markers detected. Add lines like{" "}
+                        <span className="font-semibold">User:</span> /{" "}
+                        <span className="font-semibold">Assistant:</span> so we don’t accidentally include assistant text.
+                      </div>
+                    )}
+                    <div className="mt-3 max-h-40 space-y-2 overflow-auto text-[11px] text-slate-300">
+                      {parsePreview.turns.map((t) => (
+                        <div key={t.id}>
+                          <span className="text-emerald-200">{t.id}</span>: “{t.text}”
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center justify-between">
                   <button
                     type="button"
@@ -468,6 +569,69 @@ export default function AnalyzePage() {
               </span>
               <span className="block text-[11px] text-slate-400">{readStrengthNote(profile.confidence)}</span>
             </p>
+
+            {profile.signals && (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
+                <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">AI use map</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <span className="text-slate-400">Turns analyzed:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {profile.signals.sampledTurns}/{profile.signals.totalUserTurns}
+                    </span>{" "}
+                    <span className="text-[11px] text-slate-400">
+                      ({profile.signals.sampling === "all" ? "all" : "representative sample"})
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Avg turn:</span>{" "}
+                    <span className="font-semibold text-slate-100">~{profile.signals.avgTurnLength} chars</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Constraint-setting:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {Math.round(profile.signals.constraintRate * 100)}%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Revision-seeking:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {Math.round(profile.signals.revisionRate * 100)}%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Decision-seeking:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {Math.round(profile.signals.decisionRate * 100)}%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Planning-mode:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {Math.round(profile.signals.planningRate * 100)}%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Emotional language:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {Math.round(profile.signals.emotionalLanguageRate * 100)}%
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Top domains:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {profile.signals.topDomains.length ? profile.signals.topDomains.join(", ") : "—"}
+                    </span>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-slate-400">Top constraints:</span>{" "}
+                    <span className="font-semibold text-slate-100">
+                      {profile.signals.topConstraintPatterns.length ? profile.signals.topConstraintPatterns.join(", ") : "—"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {profile.evidence && (
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-200">

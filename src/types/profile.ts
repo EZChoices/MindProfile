@@ -17,6 +17,21 @@ export type ProfileEvidence = {
   suggestedWorkflows: ProfileEvidenceItem[];
 };
 
+export type ProfileSignals = {
+  totalUserTurns: number;
+  sampledTurns: number;
+  sampledTurnsTarget: number;
+  sampling: "all" | "representative";
+  avgTurnLength: number;
+  constraintRate: number;
+  revisionRate: number;
+  decisionRate: number;
+  planningRate: number;
+  emotionalLanguageRate: number;
+  topConstraintPatterns: string[];
+  topDomains: string[];
+};
+
 export interface Profile {
   id: string;
   thinkingStyle: string;
@@ -31,6 +46,7 @@ export interface Profile {
     blindSpots: string[][];
     suggestedWorkflows: string[][];
   };
+  signals?: ProfileSignals;
   // Optional meta fields returned by the backend
   sourceMode?: SourceMode;
   inputCharCount?: number;

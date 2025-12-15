@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import { config } from "./config";
 import type { Profile, SourceMode } from "@/types/profile";
-import type { MindCard } from "@/types/mindCard";
 
 export interface AnalyzeInput {
   normalizedText: string;
@@ -39,6 +38,12 @@ Use phrasing like "You tend to...", "You often...", "You prefer..." instead of "
 PRIVACY:
 - Do not include personal names, emails, phone numbers, addresses, usernames, or unique identifiers in your output.
 - It is okay to mention non-sensitive proper nouns like tools, products, technologies, or public concepts if they clearly appear in the user's messages.
+
+INPUT YOU WILL RECEIVE:
+- A computed Signals JSON derived deterministically from the user's messages.
+- A sampled set of the user's messages with stable IDs (U1, U2, ...).
+
+USE THE SIGNALS. They are there to prevent generic, vibe-based profiling.
 
 You must respond ONLY with a JSON object matching this TypeScript type:
 
@@ -91,7 +96,7 @@ When describing "thinkingStyle", consider 2–3 of these dimensions and weave th
 
 You do not need to list these labels explicitly, but let them shape your description.
 
-5) BLIND SPOTS NEED EVIDENCE
+  5) BLIND SPOTS NEED EVIDENCE
 - Every blind-spot bullet should be connected to a visible pattern in the conversation.
 - Briefly hint at why you think this, e.g. "Because you quickly jump to implementation details..." or "Since you mostly ask about edge cases..."
 - Do NOT invent dramatic psychological issues. Stay close to the observable behavior.
@@ -100,6 +105,16 @@ EVIDENCE REQUIREMENT (NON-NEGOTIABLE)
 - For every bullet in strengths, blindSpots, and suggestedWorkflows, you MUST include 1-3 message IDs in evidenceMsgIds for that bullet.
 - The IDs must be chosen from the provided list (U1, U2, ...).
 - If you cannot find evidence for a bullet, DO NOT include that bullet at all.
+
+ANTI-MEH CONTRACT (NON-NEGOTIABLE)
+- thinkingStyle and communicationStyle must each reference at least one metric or top pattern from Signals (e.g. constraintRate, revisionRate, topConstraintPatterns).
+- Do NOT put message IDs like [U1, U2] inside the bullet text. Evidence goes ONLY in evidenceMsgIds.
+- Every bullet MUST contain at least ONE concrete anchor. Acceptable anchors:
+  (A) A metric reference (a number or percent) that matches the provided Signals JSON.
+  (B) A named behavioral pattern from this list: constraint-setting, revision-seeking, decision-seeking, planning-mode, emotional-processing.
+  (C) A \"when X → you do Y\" behavior (conditional + observable).
+  (D) For suggestedWorkflows: include a concrete prompt template (e.g., Template: \"...\"), not just advice.
+- Forbid adjective-only bullets (e.g., \"You are clear\" / \"You are thoughtful\"). If you can't be specific, omit the bullet.
 
 6) CONFIDENCE
 - Think about how much evidence you really have.
@@ -187,6 +202,97 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
 
   type Turn = { id: string; text: string };
 
+  const scoreTurnForSignal = (text: string) => {
+    const t = text.toLowerCase();
+    let score = 0;
+
+    const hasConstraint =
+      /\btone\b/.test(t) ||
+      /\bshorter\b/.test(t) ||
+      /\brewrite\b/.test(t) ||
+      /\bbullet\b/.test(t) ||
+      /\bstructure\b/.test(t) ||
+      /\bstep[- ]by[- ]step\b/.test(t) ||
+      /\bv\d+\b/.test(t) ||
+      /\bword\b/.test(t);
+    if (hasConstraint) score += 3;
+
+    const hasDecision =
+      /\bshould i\b/.test(t) ||
+      /\bchoose\b/.test(t) ||
+      /\bwhich one\b/.test(t) ||
+      /\btrade-?off\b/.test(t) ||
+      /\bpros and cons\b/.test(t);
+    if (hasDecision) score += 3;
+
+    const hasSelfDisclosure =
+      /\bi feel\b/.test(t) ||
+      /\bi keep\b/.test(t) ||
+      /\bi struggle\b/.test(t) ||
+      /\bi['’]m\b/.test(t) ||
+      /\bi am\b/.test(t) ||
+      /\bi['’]m worried\b/.test(t) ||
+      /\bi am worried\b/.test(t);
+    if (hasSelfDisclosure) score += 2;
+
+    score += Math.floor(text.length / 200);
+
+    if (/\d/.test(text)) score += 2;
+
+    return score;
+  };
+
+  const selectRepresentativeTurns = (
+    turnsAll: Turn[],
+    options?: { maxTurns?: number; maxChars?: number },
+  ) => {
+    type SampleReason = "all" | "representative";
+    const maxTurns = options?.maxTurns ?? 80;
+    const earlyCount = 20;
+    const lateCount = 20;
+    const signalCount = Math.max(0, maxTurns - earlyCount - lateCount);
+
+    if (turnsAll.length <= maxTurns) {
+      const result: { turns: Turn[]; sampleReason: SampleReason; sampledTurnCountTarget: number } = {
+        turns: turnsAll,
+        sampleReason: "all",
+        sampledTurnCountTarget: turnsAll.length,
+      };
+      return result;
+    }
+
+    const early = turnsAll.slice(0, earlyCount);
+    const late = turnsAll.slice(Math.max(0, turnsAll.length - lateCount));
+
+    const picked = new Map<string, Turn>();
+    early.forEach((t) => picked.set(t.id, t));
+    late.forEach((t) => picked.set(t.id, t));
+
+    const scored: Array<{ idx: number; turn: Turn; score: number }> = [];
+    turnsAll.forEach((turn, idx) => {
+      if (picked.has(turn.id)) return;
+      scored.push({ idx, turn, score: scoreTurnForSignal(turn.text) });
+    });
+
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.turn.text.length !== a.turn.text.length) return b.turn.text.length - a.turn.text.length;
+      return a.idx - b.idx;
+    });
+
+    for (const item of scored.slice(0, signalCount)) {
+      picked.set(item.turn.id, item.turn);
+    }
+
+    const ordered = turnsAll.filter((t) => picked.has(t.id));
+    const result: { turns: Turn[]; sampleReason: SampleReason; sampledTurnCountTarget: number } = {
+      turns: ordered,
+      sampleReason: "representative",
+      sampledTurnCountTarget: ordered.length,
+    };
+    return result;
+  };
+
   const normalizeTurnWhitespace = (text: string) =>
     text
       .replace(/\r\n/g, "\n")
@@ -244,25 +350,125 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
   };
 
   const userTurnsAll = extractUserTurns(input.normalizedText);
-  const userTurns = userTurnsAll.slice(0, 80);
+  const selected = selectRepresentativeTurns(userTurnsAll, { maxTurns: 80, maxChars: 12000 });
+  const userTurns = selected.turns;
   const derivedUserMessageCount = userTurnsAll.length > 0 ? userTurnsAll.length : input.userMessageCount;
 
-  const userTurnBlock = (() => {
+  const userTurnBlockResult = (() => {
     const maxChars = 12000;
     const parts: string[] = [];
+    const includedTurnIds: string[] = [];
     let used = 0;
     for (const t of userTurns) {
-      const block = `${t.id}:\n${t.text}`;
-      if (used + block.length + 2 > maxChars) break;
+      const maxTurnChars = 800;
+      const trimmed =
+        t.text.length > maxTurnChars ? t.text.slice(0, maxTurnChars - 1).trimEnd() + "…" : t.text;
+      const block = `${t.id}:\n${trimmed}`;
+      if (used + block.length + 2 > maxChars) continue;
       parts.push(block);
+      includedTurnIds.push(t.id);
       used += block.length + 2;
     }
-    return parts.join("\n\n");
+    return { block: parts.join("\n\n"), includedTurnIds };
   })();
+  const userTurnBlock = userTurnBlockResult.block;
+  const includedTurnIds = userTurnBlockResult.includedTurnIds;
+
+  const computeSignals = (turns: Turn[]) => {
+    const totalUserTurns = turns.length;
+    const lengths = turns.map((t) => t.text.length);
+    const avgTurnLength =
+      totalUserTurns > 0 ? Math.round(lengths.reduce((a, b) => a + b, 0) / totalUserTurns) : 0;
+
+    const countTurnsMatching = (pattern: RegExp) =>
+      turns.reduce((acc, t) => (pattern.test(t.text) ? acc + 1 : acc), 0);
+
+    const constraintTurns = countTurnsMatching(
+      /\b(tone|shorter|rewrite|bullet|structure|step[- ]by[- ]step|v\d+|word)\b/i,
+    );
+    const revisionTurns = countTurnsMatching(/\b(v\d+|rewrite|revise|edit|shorter|clearer|v2)\b/i);
+    const decisionTurns = countTurnsMatching(/\b(should i|choose|which one|trade-?off|pros and cons)\b/i);
+    const planningTurns = countTurnsMatching(/\b(plan|planning|timeline|schedule|roadmap|itinerary|checklist|steps?)\b/i);
+    const emotionalTurns = countTurnsMatching(
+      /\b(i feel|i keep|i struggle|i['’]m|i am|worried|anxious|stressed|overwhelmed|frustrated)\b/i,
+    );
+
+    const rate = (hits: number) => (totalUserTurns > 0 ? Number((hits / totalUserTurns).toFixed(3)) : 0);
+
+    const constraintPatternCounts: Array<{ key: string; label: string; count: number }> = [
+      { key: "word_count", label: "word count", count: countTurnsMatching(/\b(\d+\s*words?|word count)\b/i) },
+      { key: "tone", label: "tone calibration", count: countTurnsMatching(/\btone\b/i) },
+      { key: "shorter_clearer", label: "shorter/clearer", count: countTurnsMatching(/\b(shorter|clearer)\b/i) },
+      { key: "step_by_step", label: "step-by-step", count: countTurnsMatching(/\bstep[- ]by[- ]step\b/i) },
+      { key: "structure", label: "structure/bullets", count: countTurnsMatching(/\b(structure|bullet)\b/i) },
+      { key: "versions", label: "versions (v2+)", count: countTurnsMatching(/\bv\d+\b/i) },
+    ];
+    const topConstraintPatterns = constraintPatternCounts
+      .filter((p) => p.count > 0)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 3)
+      .map((p) => p.label);
+
+    type DomainKey =
+      | "coding_technical"
+      | "career_writing"
+      | "planning"
+      | "learning"
+      | "creative"
+      | "relationships"
+      | "money"
+      | "health_fitness"
+      | "travel"
+      | "other";
+
+    const DOMAIN_RULES: Array<{ key: DomainKey; label: string; regex: RegExp }> = [
+      { key: "coding_technical", label: "coding/technical", regex: /\b(code|bug|error|api|function|script|deploy|prisma|next\.js|react|typescript|sql|db)\b/i },
+      { key: "career_writing", label: "career writing", regex: /\b(resume|cv|cover letter|hiring manager|recruiter|outreach|linkedin|interview|job)\b/i },
+      { key: "planning", label: "planning", regex: /\b(plan|timeline|schedule|roadmap|milestone|checklist|itinerary)\b/i },
+      { key: "learning", label: "learning", regex: /\b(explain|learn|study|understand|tutorial|lesson)\b/i },
+      { key: "creative", label: "creative", regex: /\b(story|poem|novel|lyrics|character|plot)\b/i },
+      { key: "relationships", label: "relationships", regex: /\b(relationship|dating|partner|breakup|friend|family)\b/i },
+      { key: "money", label: "money", regex: /\b(budget|salary|rent|mortgage|tax|invest|credit)\b/i },
+      { key: "health_fitness", label: "health/fitness", regex: /\b(workout|gym|diet|health|sleep|run|fitness)\b/i },
+      { key: "travel", label: "travel", regex: /\b(flight|hotel|visa|trip|travel|itinerary|airport)\b/i },
+    ];
+
+    const domainCounts = new Map<DomainKey, number>();
+    for (const t of turns) {
+      const text = t.text;
+      const matched = DOMAIN_RULES.find((rule) => rule.regex.test(text));
+      const key: DomainKey = matched?.key ?? "other";
+      domainCounts.set(key, (domainCounts.get(key) ?? 0) + 1);
+    }
+    const topDomains = Array.from(domainCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([k]) => DOMAIN_RULES.find((r) => r.key === k)?.label ?? "other");
+
+    return {
+      totalUserTurns,
+      sampledTurns: includedTurnIds.length,
+      sampledTurnsTarget: selected.sampledTurnCountTarget,
+      sampling: selected.sampleReason,
+      avgTurnLength,
+      constraintRate: rate(constraintTurns),
+      revisionRate: rate(revisionTurns),
+      decisionRate: rate(decisionTurns),
+      planningRate: rate(planningTurns),
+      emotionalLanguageRate: rate(emotionalTurns),
+      topConstraintPatterns,
+      topDomains,
+    };
+  };
+
+  const signals = computeSignals(userTurnsAll);
 
   const userContent = `
 Approximate input length (characters): ${input.inputCharCount}
 Approximate user messages: ${derivedUserMessageCount}
+
+Signals (computed from ALL user turns):
+${JSON.stringify(signals, null, 2)}
 
 Here are the user's messages only (each turn is separate):
 
@@ -286,18 +492,92 @@ ${userTurnBlock}
 
   const parsed = JSON.parse(content) as Partial<Profile>;
 
+  const stripInlineMsgIdCitations = (value: string) =>
+    value
+      .replace(/\[\s*(?:U\d+\s*(?:,\s*U\d+\s*)*)\]/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+  const isMsgId = (value: string) => /^U\d+$/.test(value);
+
+  const normalizeMsgIdList = (ids: unknown) => {
+    if (!Array.isArray(ids)) return [];
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of ids) {
+      const id = typeof raw === "string" ? raw.trim() : "";
+      if (!id || !isMsgId(id) || seen.has(id)) continue;
+      if (!userTurnsAll.find((t) => t.id === id)) continue;
+      seen.add(id);
+      out.push(id);
+      if (out.length >= 3) break;
+    }
+    return out;
+  };
+
+  const hasConcreteAnchor = (text: string, kind: "bullet" | "workflow") => {
+    const lower = text.toLowerCase();
+    if (/\d/.test(text)) return true;
+    if (/\b(constraint-setting|revision-seeking|decision-seeking|planning-mode|emotional-processing)\b/i.test(text)) {
+      return true;
+    }
+    if (/\b(tone|shorter|rewrite|bullet|structure|step[- ]by[- ]step|v\d+|word)\b/i.test(text)) return true;
+    if (/\b(should i|choose|which one|trade-?off|pros and cons)\b/i.test(lower)) return true;
+    if (/\b(i feel|i keep|i struggle|worried|anxious|stressed|overwhelmed|frustrated)\b/i.test(lower)) return true;
+    if ((/\bwhen\b/.test(lower) || /\bif\b/.test(lower)) && (text.includes("→") || /\bthen\b/.test(lower))) {
+      return true;
+    }
+    if (kind === "workflow") {
+      if (/\btemplate\s*:/i.test(text)) return true;
+      if (/"[^"]{8,}"/.test(text)) return true;
+    }
+    return false;
+  };
+
+  const normalizeBullets = (items: unknown, ids: unknown, kind: "bullet" | "workflow") => {
+    const itemList = Array.isArray(items) ? items.map((v) => stripInlineMsgIdCitations(String(v))).filter(Boolean) : [];
+    const idLists = Array.isArray(ids) ? ids : [];
+    const outItems: string[] = [];
+    const outIds: string[][] = [];
+
+    for (let idx = 0; idx < itemList.length; idx++) {
+      const item = itemList[idx];
+      const msgIds = normalizeMsgIdList((idLists as unknown[])[idx]);
+      if (msgIds.length === 0) continue;
+      if (!hasConcreteAnchor(item, kind)) continue;
+      outItems.push(item);
+      outIds.push(msgIds);
+    }
+
+    return { items: outItems, ids: outIds };
+  };
+
+  const strengthsNormalized = normalizeBullets(parsed.strengths, parsed.evidenceMsgIds?.strengths, "bullet");
+  const blindSpotsNormalized = normalizeBullets(parsed.blindSpots, parsed.evidenceMsgIds?.blindSpots, "bullet");
+  const workflowsNormalized = normalizeBullets(
+    parsed.suggestedWorkflows,
+    parsed.evidenceMsgIds?.suggestedWorkflows,
+    "workflow",
+  );
+
   let profile: Profile = {
     id: "",
-    thinkingStyle: parsed.thinkingStyle || "",
-    communicationStyle: parsed.communicationStyle || "",
-    strengths: parsed.strengths ?? [],
-    blindSpots: parsed.blindSpots ?? [],
-    suggestedWorkflows: parsed.suggestedWorkflows ?? [],
-    evidenceMsgIds: parsed.evidenceMsgIds,
+    thinkingStyle: stripInlineMsgIdCitations(parsed.thinkingStyle || ""),
+    communicationStyle: stripInlineMsgIdCitations(parsed.communicationStyle || ""),
+    strengths: strengthsNormalized.items,
+    blindSpots: blindSpotsNormalized.items,
+    suggestedWorkflows: workflowsNormalized.items,
+    evidenceMsgIds: {
+      strengths: strengthsNormalized.ids,
+      blindSpots: blindSpotsNormalized.ids,
+      suggestedWorkflows: workflowsNormalized.ids,
+    },
     confidence: parsed.confidence ?? "low",
     sourceMode: input.sourceMode,
     inputCharCount: input.inputCharCount,
   };
+
+  profile.signals = signals;
 
   profile = overrideConfidence(profile, input.inputCharCount, derivedUserMessageCount);
 
