@@ -43,8 +43,11 @@ const NAME_STOPWORDS = new Set([
 
 const compressWhitespace = (text: string) =>
   text
-    .replace(/\s+/g, " ")
-    .replace(/\s+([.,!?;:])/g, "$1")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/[ \t]+([.,!?;:])/g, "$1")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
 
 export interface AnonymizeResult {

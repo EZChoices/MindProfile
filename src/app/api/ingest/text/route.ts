@@ -22,42 +22,50 @@ export async function POST(request: Request) {
       );
     }
 
-    const normalized = normalizeTextInput(text.trim());
+    const normalizedForAnalysis = normalizeTextInput(text.trim(), { redactNames: false });
+    const normalizedForStorage = normalizeTextInput(text.trim(), { redactNames: true });
     const analysis = await analyzeConversation({
-      normalizedText: normalized.normalizedText,
-      inputCharCount: normalized.inputCharCount,
-      userMessageCount: normalized.userMessageCount,
+      normalizedText: normalizedForAnalysis.normalizedText,
+      inputCharCount: normalizedForAnalysis.inputCharCount,
+      userMessageCount: normalizedForAnalysis.userMessageCount,
       sourceMode: "text",
     });
 
     const sampleText =
-      normalized.normalizedText.length > 1200
-        ? normalized.normalizedText.slice(0, 1200)
-        : normalized.normalizedText;
+      normalizedForStorage.normalizedText.length > 1200
+        ? normalizedForStorage.normalizedText.slice(0, 1200)
+        : normalizedForStorage.normalizedText;
 
-    const mindCard: MindCard = await inferMindCard({
-      profile: {
-        ...analysis.profile,
-        id: "",
-      },
-      sampleText,
-    });
+    const shouldGenerateMindCard =
+      analysis.profile.confidence !== "low" &&
+      normalizedForAnalysis.userMessageCount >= 6 &&
+      normalizedForAnalysis.inputCharCount >= 500;
+
+    const mindCard: MindCard | null = shouldGenerateMindCard
+      ? await inferMindCard({
+          profile: {
+            ...analysis.profile,
+            id: "",
+          },
+          sampleText,
+        })
+      : null;
 
     const dbProfile = await prisma.profile.create({
       data: {
         clientId,
-        sourceMode: normalized.sourceMode,
+        sourceMode: normalizedForStorage.sourceMode,
         confidence: analysis.profile.confidence,
         thinkingStyle: analysis.profile.thinkingStyle,
         communicationStyle: analysis.profile.communicationStyle,
         strengthsJson: analysis.profile.strengths,
         blindSpotsJson: analysis.profile.blindSpots,
         suggestedJson: analysis.profile.suggestedWorkflows,
-        rawText: normalized.normalizedText,
+        rawText: normalizedForStorage.normalizedText,
         model: analysis.modelUsed,
         promptVersion: analysis.promptVersion,
-        inputCharCount: normalized.inputCharCount,
-        inputSourceHost: normalized.inputSourceHost,
+        inputCharCount: normalizedForAnalysis.inputCharCount,
+        inputSourceHost: normalizedForStorage.inputSourceHost,
         promptTokens: analysis.promptTokens,
         completionTokens: analysis.completionTokens,
         mindCard: mindCard as unknown as Prisma.InputJsonValue,
@@ -74,8 +82,8 @@ export async function POST(request: Request) {
     const responseProfile: Profile = {
       ...analysis.profile,
       id: dbProfile.id,
-      sourceMode: normalized.sourceMode,
-      inputCharCount: normalized.inputCharCount,
+      sourceMode: normalizedForStorage.sourceMode,
+      inputCharCount: normalizedForAnalysis.inputCharCount,
       model: analysis.modelUsed,
       promptVersion: analysis.promptVersion,
     };

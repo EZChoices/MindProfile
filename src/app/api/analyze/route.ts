@@ -54,7 +54,11 @@ const extractTextFromHtml = (html: string): string => {
   $("script, style").remove();
   const mainText = $("main").text();
   const bodyText = $("body").text();
-  const text = (mainText || bodyText || "").replace(/\s+/g, " ").trim();
+  const text = (mainText || bodyText || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   return text;
 };
 
@@ -74,29 +78,47 @@ const parseNextDataFromHtml = (html: string): { data: any | null; buildId: strin
   }
 };
 
-const normalizeChatGptMessageContent = (message: any): string | null => {
-  const role = message?.message?.author?.role ?? message?.author?.role;
-  if (role && role !== "user" && role !== "assistant") return null;
+const normalizeChatGptMessage = (message: any): { role: "user" | "assistant"; content: string } | null => {
+  const roleRaw =
+    message?.message?.author?.role ??
+    message?.author?.role ??
+    message?.message?.role ??
+    message?.role ??
+    null;
+  if (roleRaw !== "user" && roleRaw !== "assistant") return null;
+
   const content = message?.message?.content ?? message?.content;
   if (!content) return null;
+
+  let text: string | null = null;
   if (Array.isArray(content.parts)) {
     const parts = content.parts.filter((p: unknown) => typeof p === "string") as string[];
-    return parts.join(" ");
+    text = parts.join("\n");
+  } else if (typeof content.text === "string") {
+    text = content.text;
+  } else if (typeof content === "string") {
+    text = content;
   }
-  if (typeof content.text === "string") return content.text;
-  if (typeof content === "string") return content;
-  return null;
+
+  const cleaned = (text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  if (!cleaned.length) return null;
+  return { role: roleRaw, content: cleaned };
 };
 
 const combineChatGptMessages = (messages: any[]): string | null => {
   const parts: string[] = [];
   for (const msg of messages) {
-    const text = normalizeChatGptMessageContent(msg);
-    if (text && text.trim().length) {
-      parts.push(text.trim());
-    }
+    const normalized = normalizeChatGptMessage(msg);
+    if (!normalized) continue;
+    const label = normalized.role === "user" ? "User:" : "AI:";
+    parts.push(`${label} ${normalized.content}`);
   }
-  const combined = parts.join("\n").replace(/\s+/g, " ").trim();
+  const combined = parts.join("\n").trim();
   return combined.length ? combined : null;
 };
 
@@ -271,42 +293,50 @@ export async function POST(request: Request) {
         );
       }
 
-      const normalized = normalizeTextInput(text);
+      const normalizedForAnalysis = normalizeTextInput(text, { redactNames: false });
+      const normalizedForStorage = normalizeTextInput(text, { redactNames: true });
       const analysis = await analyzeConversation({
-        normalizedText: normalized.normalizedText,
-        inputCharCount: normalized.inputCharCount,
-        userMessageCount: normalized.userMessageCount,
+        normalizedText: normalizedForAnalysis.normalizedText,
+        inputCharCount: normalizedForAnalysis.inputCharCount,
+        userMessageCount: normalizedForAnalysis.userMessageCount,
         sourceMode: "text",
       });
 
       const sampleText =
-        normalized.normalizedText.length > 1200
-          ? normalized.normalizedText.slice(0, 1200)
-          : normalized.normalizedText;
+        normalizedForStorage.normalizedText.length > 1200
+          ? normalizedForStorage.normalizedText.slice(0, 1200)
+          : normalizedForStorage.normalizedText;
 
-      const mindCard: MindCard = await inferMindCard({
-        profile: {
-          ...analysis.profile,
-          id: "",
-        },
-        sampleText,
-      });
+      const shouldGenerateMindCard =
+        analysis.profile.confidence !== "low" &&
+        normalizedForAnalysis.userMessageCount >= 6 &&
+        normalizedForAnalysis.inputCharCount >= 500;
+
+      const mindCard: MindCard | null = shouldGenerateMindCard
+        ? await inferMindCard({
+            profile: {
+              ...analysis.profile,
+              id: "",
+            },
+            sampleText,
+          })
+        : null;
 
       const dbProfile = await prisma.profile.create({
         data: {
           clientId,
-          sourceMode: normalized.sourceMode,
+          sourceMode: normalizedForStorage.sourceMode,
           confidence: analysis.profile.confidence,
           thinkingStyle: analysis.profile.thinkingStyle,
           communicationStyle: analysis.profile.communicationStyle,
           strengthsJson: analysis.profile.strengths,
           blindSpotsJson: analysis.profile.blindSpots,
           suggestedJson: analysis.profile.suggestedWorkflows,
-          rawText: normalized.normalizedText,
+          rawText: normalizedForStorage.normalizedText,
           model: analysis.modelUsed,
           promptVersion: analysis.promptVersion,
-          inputCharCount: normalized.inputCharCount,
-          inputSourceHost: normalized.inputSourceHost,
+          inputCharCount: normalizedForAnalysis.inputCharCount,
+          inputSourceHost: normalizedForStorage.inputSourceHost,
           promptTokens: analysis.promptTokens,
           completionTokens: analysis.completionTokens,
           mindCard: mindCard as unknown as Prisma.InputJsonValue,
@@ -324,8 +354,8 @@ export async function POST(request: Request) {
       const profile: Profile = {
         ...analysis.profile,
         id: dbProfile.id,
-        sourceMode: normalized.sourceMode,
-        inputCharCount: normalized.inputCharCount,
+        sourceMode: normalizedForStorage.sourceMode,
+        inputCharCount: normalizedForAnalysis.inputCharCount,
         model: analysis.modelUsed,
         promptVersion: analysis.promptVersion,
       };
@@ -466,42 +496,50 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "invalid_url_or_content" }, { status: 400 });
       }
 
-      const normalized = normalizeUrlInput(combined, shareUrls[0] || "");
+      const normalizedForAnalysis = normalizeUrlInput(combined, shareUrls[0] || "", { redactNames: false });
+      const normalizedForStorage = normalizeUrlInput(combined, shareUrls[0] || "", { redactNames: true });
       const analysis = await analyzeConversation({
-        normalizedText: normalized.normalizedText,
-        inputCharCount: normalized.inputCharCount,
-        userMessageCount: normalized.userMessageCount,
+        normalizedText: normalizedForAnalysis.normalizedText,
+        inputCharCount: normalizedForAnalysis.inputCharCount,
+        userMessageCount: normalizedForAnalysis.userMessageCount,
         sourceMode: "url",
       });
 
       const sampleText =
-        normalized.normalizedText.length > 1200
-          ? normalized.normalizedText.slice(0, 1200)
-          : normalized.normalizedText;
+        normalizedForStorage.normalizedText.length > 1200
+          ? normalizedForStorage.normalizedText.slice(0, 1200)
+          : normalizedForStorage.normalizedText;
 
-      const mindCard: MindCard = await inferMindCard({
-        profile: {
-          ...analysis.profile,
-          id: "",
-        },
-        sampleText,
-      });
+      const shouldGenerateMindCard =
+        analysis.profile.confidence !== "low" &&
+        normalizedForAnalysis.userMessageCount >= 6 &&
+        normalizedForAnalysis.inputCharCount >= 500;
+
+      const mindCard: MindCard | null = shouldGenerateMindCard
+        ? await inferMindCard({
+            profile: {
+              ...analysis.profile,
+              id: "",
+            },
+            sampleText,
+          })
+        : null;
 
       const dbProfile = await prisma.profile.create({
         data: {
           clientId,
-          sourceMode: normalized.sourceMode,
+          sourceMode: normalizedForStorage.sourceMode,
           confidence: analysis.profile.confidence,
           thinkingStyle: analysis.profile.thinkingStyle,
           communicationStyle: analysis.profile.communicationStyle,
           strengthsJson: analysis.profile.strengths,
           blindSpotsJson: analysis.profile.blindSpots,
           suggestedJson: analysis.profile.suggestedWorkflows,
-          rawText: normalized.normalizedText,
+          rawText: normalizedForStorage.normalizedText,
           model: analysis.modelUsed,
           promptVersion: analysis.promptVersion,
-          inputCharCount: normalized.inputCharCount,
-          inputSourceHost: normalized.inputSourceHost,
+          inputCharCount: normalizedForAnalysis.inputCharCount,
+          inputSourceHost: normalizedForStorage.inputSourceHost,
           promptTokens: analysis.promptTokens,
           completionTokens: analysis.completionTokens,
           mindCard: mindCard as unknown as Prisma.InputJsonValue,
@@ -518,8 +556,8 @@ export async function POST(request: Request) {
       const profile: Profile = {
         ...analysis.profile,
         id: dbProfile.id,
-        sourceMode: normalized.sourceMode,
-        inputCharCount: normalized.inputCharCount,
+        sourceMode: normalizedForStorage.sourceMode,
+        inputCharCount: normalizedForAnalysis.inputCharCount,
         model: analysis.modelUsed,
         promptVersion: analysis.promptVersion,
       };

@@ -19,8 +19,8 @@ export interface AnalyzeResult {
   completionTokens?: number;
 }
 
-const PROMPT_VERSION = "v0.4";
-const PROMPT_VERSION_INSUFFICIENT = "v0.4-insufficient";
+const PROMPT_VERSION = "v0.5";
+const PROMPT_VERSION_INSUFFICIENT = "v0.5-insufficient";
 const MIN_CHARS_FOR_PROFILE = 220;
 
 const client = new OpenAI({
@@ -35,6 +35,10 @@ Your job is to infer how the human tends to THINK and COMMUNICATE based ONLY on 
 
 Write your output in SECOND PERSON, as if you are talking directly to the user.
 Use phrasing like "You tend to...", "You often...", "You prefer..." instead of "the human" or "the user".
+
+PRIVACY:
+- Do not include personal names, emails, phone numbers, addresses, usernames, or unique identifiers in your output.
+- It is okay to mention non-sensitive proper nouns like tools, products, technologies, or public concepts if they clearly appear in the user's messages.
 
 You must respond ONLY with a JSON object matching this TypeScript type:
 
@@ -171,13 +175,80 @@ export async function analyzeConversation(input: AnalyzeInput): Promise<AnalyzeR
 
   const model = input.modelOverride || config.openAiModel || "gpt-4.1-mini";
 
+  type Turn = { id: string; text: string };
+
+  const extractUserTurns = (transcript: string): Turn[] => {
+    const lines = transcript.replace(/\r\n/g, "\n").split("\n");
+    const turns: Array<{ role: "user" | "assistant"; text: string }> = [];
+
+    let currentRole: "user" | "assistant" | null = null;
+    let buffer: string[] = [];
+
+    const flush = () => {
+      if (!currentRole) return;
+      const text = buffer.join("\n").trim();
+      buffer = [];
+      if (!text) return;
+      turns.push({ role: currentRole, text });
+    };
+
+    const startsUser = (line: string) => /^\s*(user|human)\s*:/i.test(line);
+    const startsAssistant = (line: string) => /^\s*(assistant|ai|chatgpt|claude|gemini)\s*:/i.test(line);
+    const stripPrefix = (line: string) => line.replace(/^\s*[^:]{2,20}:\s*/i, "");
+
+    for (const line of lines) {
+      if (startsUser(line)) {
+        flush();
+        currentRole = "user";
+        buffer.push(stripPrefix(line));
+        continue;
+      }
+      if (startsAssistant(line)) {
+        flush();
+        currentRole = "assistant";
+        buffer.push(stripPrefix(line));
+        continue;
+      }
+      if (!currentRole) currentRole = "user";
+      buffer.push(line);
+    }
+    flush();
+
+    const userTurns = turns.filter((t) => t.role === "user").map((t, idx) => ({
+      id: `U${idx + 1}`,
+      text: t.text.replace(/\s+/g, " ").trim(),
+    }));
+
+    if (userTurns.length > 0) return userTurns;
+
+    const fallback = transcript.replace(/\s+/g, " ").trim();
+    return fallback.length ? [{ id: "U1", text: fallback }] : [];
+  };
+
+  const userTurnsAll = extractUserTurns(input.normalizedText);
+  const userTurns = userTurnsAll.slice(0, 80);
+  const derivedUserMessageCount = userTurnsAll.length > 0 ? userTurnsAll.length : input.userMessageCount;
+
+  const userTurnBlock = (() => {
+    const maxChars = 12000;
+    const parts: string[] = [];
+    let used = 0;
+    for (const t of userTurns) {
+      const line = `${t.id}: ${t.text}`;
+      if (used + line.length + 1 > maxChars) break;
+      parts.push(line);
+      used += line.length + 1;
+    }
+    return parts.join("\n");
+  })();
+
   const userContent = `
 Approximate input length (characters): ${input.inputCharCount}
-Approximate user messages: ${input.userMessageCount}
+Approximate user messages: ${derivedUserMessageCount}
 
-Here is the anonymized conversation text (may include multiple chats):
+Here are the user's messages only (each turn is separate):
 
-${input.normalizedText}
+${userTurnBlock}
   `.trim();
 
   const completion = await client.chat.completions.create({
@@ -187,7 +258,7 @@ ${input.normalizedText}
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ],
-    temperature: 0.6,
+    temperature: 0.2,
   });
 
   const content = completion.choices[0]?.message?.content;
@@ -209,7 +280,104 @@ ${input.normalizedText}
     inputCharCount: input.inputCharCount,
   };
 
-  profile = overrideConfidence(profile, input.inputCharCount, input.userMessageCount);
+  profile = overrideConfidence(profile, input.inputCharCount, derivedUserMessageCount);
+
+  const STOPWORDS = new Set([
+    "the",
+    "and",
+    "that",
+    "this",
+    "with",
+    "from",
+    "your",
+    "you",
+    "for",
+    "are",
+    "was",
+    "were",
+    "have",
+    "has",
+    "had",
+    "but",
+    "not",
+    "just",
+    "like",
+    "into",
+    "about",
+    "when",
+    "then",
+    "than",
+    "what",
+    "how",
+    "why",
+    "can",
+    "could",
+    "should",
+    "would",
+    "want",
+    "need",
+    "make",
+    "made",
+    "use",
+    "using",
+    "used",
+    "help",
+    "please",
+  ]);
+
+  const tokenize = (text: string) =>
+    text
+      .toLowerCase()
+      .split(/[^a-z0-9']+/g)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .filter((t) => t.length >= 3)
+      .filter((t) => !STOPWORDS.has(t))
+      .filter((t) => !/^\d+$/.test(t));
+
+  const excerpt = (text: string, maxChars = 160) => {
+    const cleaned = text.replace(/\s+/g, " ").trim();
+    if (cleaned.length <= maxChars) return cleaned;
+    return cleaned.slice(0, maxChars - 1).trimEnd() + "…";
+  };
+
+  const evidenceForList = (items: string[]) => {
+    return items.map((item) => {
+      const itemTokens = new Set(tokenize(item));
+      const scored = userTurnsAll
+        .map((turn) => {
+          const turnTokens = tokenize(turn.text);
+          let overlap = 0;
+          for (const tok of turnTokens) {
+            if (itemTokens.has(tok)) overlap += 1;
+          }
+          return { turn, overlap };
+        })
+        .sort((a, b) => b.overlap - a.overlap);
+
+      const strong = scored.filter((s) => s.overlap >= 2);
+      const weak = scored.filter((s) => s.overlap >= 1);
+      const picked = (strong.length > 0 ? strong : weak).slice(0, 2);
+      const receipts =
+        picked.length > 0
+          ? picked.map((p) => ({ msgId: p.turn.id, excerpt: excerpt(p.turn.text) }))
+          : userTurnsAll[0]
+            ? [{ msgId: userTurnsAll[0].id, excerpt: excerpt(userTurnsAll[0].text) }]
+            : [];
+
+      return {
+        item,
+        relatedMessageCount: weak.length,
+        receipts,
+      };
+    });
+  };
+
+  profile.evidence = {
+    strengths: evidenceForList(profile.strengths),
+    blindSpots: evidenceForList(profile.blindSpots),
+    suggestedWorkflows: evidenceForList(profile.suggestedWorkflows),
+  };
 
   return {
     profile,

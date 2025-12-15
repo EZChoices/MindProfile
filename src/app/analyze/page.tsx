@@ -7,6 +7,7 @@ import type { MindCard } from "@/types/mindCard";
 import { MindCardView } from "@/components/MindCardView";
 import { ShareLinkBlock } from "@/components/ShareLinkBlock";
 import { getOrCreateClientId } from "@/lib/clientId";
+import { anonymizeText } from "@/lib/anonymize";
 
 type Mode = "link" | "text" | "screenshots";
 type ProfileSource = SourceMode;
@@ -87,6 +88,11 @@ export default function AnalyzePage() {
   const [apiError, setApiError] = useState<string | null>(null);
   const [submissionCount, setSubmissionCount] = useState<number | null>(null);
   const [tier, setTier] = useState<Tier>("first_impression");
+  const [showReceipts, setShowReceipts] = useState(false);
+  const [maskNamesInReceipts, setMaskNamesInReceipts] = useState(false);
+
+  const formatReceipt = (text: string) =>
+    maskNamesInReceipts ? anonymizeText(text).sanitized : text;
 
   const handleScreenshotSelect = (files: FileList | null) => {
     const next = Array.from(files ?? []).slice(0, 5);
@@ -184,6 +190,7 @@ export default function AnalyzePage() {
       }
 
       setProfile(data.profile);
+      setShowReceipts(false);
       setProfileId(data.profileId ?? null);
       setMindCard(data.mindCard ?? null);
       setSubmissionCount(data.submissionCount ?? null);
@@ -462,6 +469,36 @@ export default function AnalyzePage() {
               <span className="block text-[11px] text-slate-400">{readStrengthNote(profile.confidence)}</span>
             </p>
 
+            {profile.evidence && (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-xs text-slate-200">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={showReceipts}
+                      onChange={(e) => setShowReceipts(e.currentTarget.checked)}
+                      className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                    />
+                    Show receipts (private)
+                  </label>
+                  {showReceipts && (
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={maskNamesInReceipts}
+                        onChange={(e) => setMaskNamesInReceipts(e.currentTarget.checked)}
+                        className="h-4 w-4 rounded border border-white/20 bg-white/5 text-emerald-300"
+                      />
+                      Mask names
+                    </label>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-slate-400">
+                  Receipts are short excerpts from your messages that ground each bullet.
+                </p>
+              </div>
+            )}
+
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">
@@ -481,17 +518,41 @@ export default function AnalyzePage() {
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Strengths</div>
                 <ul className="mt-2 list-inside list-disc space-y-2 text-slate-200">
-                  {profile.strengths.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
+                  {profile.strengths.map((item, idx) => {
+                    const receipts = profile.evidence?.strengths?.[idx]?.receipts ?? [];
+                    return (
+                      <li key={`${idx}-${item}`}>
+                        {item}
+                        {showReceipts && receipts.length > 0 && (
+                          <div className="mt-1 space-y-1 text-[11px] text-slate-400">
+                            {receipts.slice(0, 2).map((r) => (
+                              <div key={`${idx}-${r.msgId}`}>{r.msgId}: “{formatReceipt(r.excerpt)}”</div>
+                            ))}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Blind spots</div>
                 <ul className="mt-2 list-inside list-disc space-y-2 text-slate-200">
-                  {profile.blindSpots.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
+                  {profile.blindSpots.map((item, idx) => {
+                    const receipts = profile.evidence?.blindSpots?.[idx]?.receipts ?? [];
+                    return (
+                      <li key={`${idx}-${item}`}>
+                        {item}
+                        {showReceipts && receipts.length > 0 && (
+                          <div className="mt-1 space-y-1 text-[11px] text-slate-400">
+                            {receipts.slice(0, 2).map((r) => (
+                              <div key={`${idx}-${r.msgId}`}>{r.msgId}: “{formatReceipt(r.excerpt)}”</div>
+                            ))}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
@@ -499,9 +560,21 @@ export default function AnalyzePage() {
                   Suggested workflows
                 </div>
                 <ul className="mt-2 list-inside list-disc space-y-2 text-slate-200">
-                  {profile.suggestedWorkflows.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
+                  {profile.suggestedWorkflows.map((item, idx) => {
+                    const receipts = profile.evidence?.suggestedWorkflows?.[idx]?.receipts ?? [];
+                    return (
+                      <li key={`${idx}-${item}`}>
+                        {item}
+                        {showReceipts && receipts.length > 0 && (
+                          <div className="mt-1 space-y-1 text-[11px] text-slate-400">
+                            {receipts.slice(0, 2).map((r) => (
+                              <div key={`${idx}-${r.msgId}`}>{r.msgId}: “{formatReceipt(r.excerpt)}”</div>
+                            ))}
+                          </div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             </div>

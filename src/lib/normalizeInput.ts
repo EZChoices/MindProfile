@@ -24,8 +24,8 @@ export const estimateUserMessageCount = (normalizedText: string): number => {
   return nonEmpty.length;
 };
 
-export const normalizeTextInput = (raw: string): NormalizedInput => {
-  const { sanitized } = anonymizeText(raw);
+export const normalizeTextInput = (raw: string, options?: { redactNames?: boolean }): NormalizedInput => {
+  const { sanitized } = anonymizeText(raw, { redactNames: options?.redactNames });
   const normalizedText = cleanWhitespace(sanitized);
   return {
     normalizedText,
@@ -36,7 +36,7 @@ export const normalizeTextInput = (raw: string): NormalizedInput => {
   };
 };
 
-export const normalizeUrlInput = (rawText: string, url: string): NormalizedInput => {
+export const normalizeUrlInput = (rawText: string, url: string, options?: { redactNames?: boolean }): NormalizedInput => {
   const host = (() => {
     try {
       return new URL(url).hostname;
@@ -45,7 +45,7 @@ export const normalizeUrlInput = (rawText: string, url: string): NormalizedInput
     }
   })();
 
-  const { sanitized } = anonymizeText(rawText);
+  const { sanitized } = anonymizeText(rawText, { redactNames: options?.redactNames });
   const normalizedText = cleanWhitespace(sanitized);
   return {
     normalizedText,
@@ -56,9 +56,9 @@ export const normalizeUrlInput = (rawText: string, url: string): NormalizedInput
   };
 };
 
-export const normalizeScreenshotInput = (ocrTexts: string[]): NormalizedInput => {
+export const normalizeScreenshotInput = (ocrTexts: string[], options?: { redactNames?: boolean }): NormalizedInput => {
   const joined = cleanWhitespace(ocrTexts.filter(Boolean).join("\n\n"));
-  const { sanitized } = anonymizeText(joined);
+  const { sanitized } = anonymizeText(joined, { redactNames: options?.redactNames });
   const normalizedText = cleanWhitespace(sanitized);
   return {
     normalizedText,

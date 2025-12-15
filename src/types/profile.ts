@@ -1,5 +1,22 @@
 export type SourceMode = "text" | "url" | "screenshots";
 
+export type ProfileReceipt = {
+  msgId: string;
+  excerpt: string;
+};
+
+export type ProfileEvidenceItem = {
+  item: string;
+  relatedMessageCount: number;
+  receipts: ProfileReceipt[];
+};
+
+export type ProfileEvidence = {
+  strengths: ProfileEvidenceItem[];
+  blindSpots: ProfileEvidenceItem[];
+  suggestedWorkflows: ProfileEvidenceItem[];
+};
+
 export interface Profile {
   id: string;
   thinkingStyle: string;
@@ -8,6 +25,7 @@ export interface Profile {
   blindSpots: string[];
   suggestedWorkflows: string[];
   confidence: "low" | "medium" | "high";
+  evidence?: ProfileEvidence;
   // Optional meta fields returned by the backend
   sourceMode?: SourceMode;
   inputCharCount?: number;

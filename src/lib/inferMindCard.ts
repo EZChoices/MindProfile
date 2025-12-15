@@ -87,6 +87,7 @@ GUIDELINES:
 - BrainIndex overall is about how their thinking presents to AI: complexity, structure, tradeoff-awareness, nuance, etc.
 - Avoid clinical language, diagnoses, or strong claims.
 - Do NOT add disclaimers inside the fields; the UI will handle that. Just provide the JSON data itself.
+- Do not repeat any personal names, emails, phone numbers, addresses, usernames, or unique identifiers from the text.
 
 Respond ONLY with a JSON object that matches MindCard. Do not wrap it in markdown or add commentary.
   `.trim();
@@ -110,7 +111,7 @@ Use both the profile and the text snippet to infer a MindCard as described.
       { role: "system", content: systemPrompt },
       { role: "user", content: userContent },
     ],
-    temperature: 0.6,
+    temperature: 0.5,
   });
 
   const raw = completion.choices[0]?.message?.content;
