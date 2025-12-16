@@ -32,6 +32,9 @@ export default async function AdminProfilesPage({
     );
   }
 
+  const keyParam = providedKey ? `key=${encodeURIComponent(providedKey)}` : null;
+  const withKey = (href: string) => (keyParam ? `${href}${href.includes("?") ? "&" : "?"}${keyParam}` : href);
+
   const profiles = await prisma.profile.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
@@ -46,6 +49,18 @@ export default async function AdminProfilesPage({
       promptVersion: true,
       resonance: true,
       feedbackText: true,
+    },
+  });
+
+  const rewinds = await prisma.yearSummary.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: {
+      id: true,
+      createdAt: true,
+      clientId: true,
+      year: true,
+      summaryJson: true,
     },
   });
 
@@ -86,6 +101,43 @@ export default async function AdminProfilesPage({
             Create new
           </Link>
         </div>
+
+        <div className="glass card-border space-y-3 rounded-3xl border border-white/10 bg-white/5 p-6">
+          <div>
+            <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Exports</p>
+            <p className="muted mt-1 text-sm text-slate-300">Download the raw report JSON blobs for review.</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={withKey("/api/admin/export/profiles?download=1&format=jsonl")}
+              className="rounded-full border border-emerald-300/50 bg-emerald-300/15 px-4 py-2 text-xs font-semibold text-emerald-50 hover:border-emerald-300/80 hover:bg-emerald-300/20"
+            >
+              Download profiles (JSONL)
+            </a>
+            <a
+              href={withKey("/api/admin/export/profiles?download=1&format=jsonl&includeRawText=1")}
+              className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-white/25 hover:bg-white/10"
+            >
+              Profiles + rawText
+            </a>
+            <a
+              href={withKey("/api/admin/export/rewinds?download=1&format=jsonl")}
+              className="rounded-full border border-white/15 bg-white/5 px-4 py-2 text-xs font-semibold text-slate-100 hover:border-white/25 hover:bg-white/10"
+            >
+              Download rewinds (JSONL)
+            </a>
+            <a href={withKey("/api/admin/export/profiles?format=json")} className="text-xs text-emerald-200 underline">
+              Open profiles JSON
+            </a>
+            <a href={withKey("/api/admin/export/rewinds?format=json")} className="text-xs text-emerald-200 underline">
+              Open rewinds JSON
+            </a>
+          </div>
+          <p className="text-xs text-slate-400">
+            Tip: JSONL is easiest to diff/grep. Use “Profiles + rawText” only when you need to audit masking/storage.
+          </p>
+        </div>
+
         <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
           <table className="min-w-full text-left text-sm text-slate-100">
             <thead className="bg-white/10 text-xs uppercase tracking-[0.1em] text-emerald-200">
@@ -100,6 +152,7 @@ export default async function AdminProfilesPage({
                 <th className="px-4 py-3">Feedback?</th>
                 <th className="px-4 py-3">Link</th>
                 <th className="px-4 py-3">Raw</th>
+                <th className="px-4 py-3">Download</th>
               </tr>
             </thead>
             <tbody>
@@ -161,13 +214,98 @@ export default async function AdminProfilesPage({
                         Raw
                       </a>
                     </td>
+                    <td className="px-4 py-3">
+                      <a
+                        href={`/api/profile/${profile.id}?download=1`}
+                        className="text-emerald-200 underline"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Download
+                      </a>
+                    </td>
                   </tr>
                 );
               })}
               {profiles.length === 0 && (
                 <tr>
-                  <td className="px-4 py-4 text-slate-400" colSpan={10}>
+                  <td className="px-4 py-4 text-slate-400" colSpan={11}>
                     No profiles yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
+          <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Recent rewinds</p>
+              <p className="muted text-sm text-slate-300">Latest Year in Rewind summaries (stored JSON only).</p>
+            </div>
+            <a
+              href={withKey("/api/admin/export/rewinds?download=1&format=jsonl")}
+              className="text-xs font-semibold text-emerald-200 underline"
+            >
+              Download all
+            </a>
+          </div>
+          <table className="min-w-full text-left text-sm text-slate-100">
+            <thead className="bg-white/10 text-xs uppercase tracking-[0.1em] text-emerald-200">
+              <tr>
+                <th className="px-4 py-3">Created</th>
+                <th className="px-4 py-3">Year</th>
+                <th className="px-4 py-3">Convos</th>
+                <th className="px-4 py-3">Prompts</th>
+                <th className="px-4 py-3">Active days</th>
+                <th className="px-4 py-3">Link</th>
+                <th className="px-4 py-3">Download</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rewinds.map((rewind) => {
+                const summary = (rewind.summaryJson ?? {}) as Record<string, unknown>;
+                const totalConversations =
+                  typeof summary.totalConversations === "number" ? summary.totalConversations : null;
+                const totalUserMessages =
+                  typeof summary.totalUserMessages === "number" ? summary.totalUserMessages : null;
+                const activeDays = typeof summary.activeDays === "number" ? summary.activeDays : null;
+
+                return (
+                  <tr key={rewind.id} className="border-t border-white/5">
+                    <td className="px-4 py-3 text-slate-200">{formatDate(rewind.createdAt)}</td>
+                    <td className="px-4 py-3 text-slate-200">{rewind.year ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-200">{totalConversations ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-200">{totalUserMessages ?? "-"}</td>
+                    <td className="px-4 py-3 text-slate-200">{activeDays ?? "-"}</td>
+                    <td className="px-4 py-3">
+                      <a
+                        href={withKey(`/api/admin/export/rewinds?id=${encodeURIComponent(rewind.id)}&format=json`)}
+                        className="text-emerald-200 underline"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View
+                      </a>
+                    </td>
+                    <td className="px-4 py-3">
+                      <a
+                        href={withKey(`/api/admin/export/rewinds?id=${encodeURIComponent(rewind.id)}&download=1&format=json`)}
+                        className="text-emerald-200 underline"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Download
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+              {rewinds.length === 0 && (
+                <tr>
+                  <td className="px-4 py-4 text-slate-400" colSpan={7}>
+                    No rewinds yet.
                   </td>
                 </tr>
               )}
@@ -182,7 +320,7 @@ export default async function AdminProfilesPage({
               <p className="muted text-sm">Latest failed analyses with reasons.</p>
             </div>
             <Link
-              href={requiredKey ? `/api/admin/analysis-logs?key=${requiredKey}` : "/api/admin/analysis-logs"}
+              href={withKey("/api/admin/analysis-logs")}
               className="text-emerald-200 underline"
             >
               Open JSON

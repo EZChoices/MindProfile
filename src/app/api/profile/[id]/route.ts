@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -21,7 +21,15 @@ export async function GET(
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
     }
 
-    return NextResponse.json(record);
+    const download = request.nextUrl.searchParams.get("download") === "1";
+    const headers = new Headers({
+      "Cache-Control": "no-store",
+    });
+    if (download) {
+      headers.set("Content-Disposition", `attachment; filename="mindprofile-profile-${id}.json"`);
+    }
+
+    return NextResponse.json(record, { headers });
   } catch (error) {
     console.error("GET /api/profile/[id] failed", error);
     return NextResponse.json(
