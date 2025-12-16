@@ -13,11 +13,45 @@ export interface PhraseInsight {
 }
 
 export interface RewindEvidencePointer {
+  sessionId?: string | null;
   conversationId: string | null;
   msgId?: string | null;
   startDay: string | null;
   endDay: string | null;
   snippets: string[];
+}
+
+export type RewindSessionEnding = "resolved" | "abandoned" | "unknown";
+
+export interface RewindSessionLite {
+  sessionId: string;
+  month: string | null;
+  ending: RewindSessionEnding;
+  intent: ForensicIntent;
+  domain: ForensicDomain;
+  userMessages: number;
+  promptCharsTotal: number;
+  signals: {
+    indecision: number;
+    perfection: number;
+    friction: number;
+    reassurance: number;
+  };
+  openerFingerprint: string;
+}
+
+export interface RewindEvidenceRefs {
+  sessionIds: string[];
+  nearMissSessionIds?: string[];
+}
+
+export interface RewindEvidenceWithPointers extends RewindEvidenceRefs {
+  pointers: RewindEvidencePointer[];
+}
+
+export interface RewindInsightEvidence extends RewindEvidenceWithPointers {
+  counts: string[];
+  excerpts: string[];
 }
 
 export type ForensicIntent =
@@ -69,11 +103,7 @@ export interface RewindInsight {
   key: string;
   title: string;
   observation: string;
-  evidence: {
-    counts: string[];
-    excerpts: string[];
-    pointers: RewindEvidencePointer[];
-  };
+  evidence: RewindInsightEvidence;
   interpretation: string;
   cost: string;
   experiment: string;
@@ -96,12 +126,12 @@ export interface RewindDeepDive {
     resolvedSessions: number;
     abandonedSessions: number;
     intents: Array<{ key: ForensicIntent; label: string; count: number; pct: number }>;
-    domains: Array<{ key: ForensicDomain; label: string; count: number; pct: number }>;
+    topicClusters: Array<{ key: string; label: string; count: number; pct: number }>;
     cognitiveModes: Array<{ key: ForensicCognitiveMode; label: string; count: number; pct: number }>;
     tones: Array<{ key: ForensicTone; label: string; count: number; pct: number }>;
     helpTypes: Array<{ key: ForensicHelpType; label: string; count: number; pct: number }>;
-    topOpeners: Array<{ label: string; count: number; excerpt: string | null; evidence: RewindEvidencePointer[] }>;
-    topEndings: Array<{ label: string; count: number; evidence: RewindEvidencePointer[] }>;
+    topOpeners: Array<{ label: string; count: number; excerpt: string | null; evidence: RewindEvidenceWithPointers }>;
+    topEndings: Array<{ label: string; count: number; evidence: RewindEvidenceWithPointers }>;
     ratios: {
       exploratorySessions: number;
       convergentSessions: number;
@@ -117,7 +147,9 @@ export interface RewindDeepDive {
     title: string;
     observation: string;
     evidenceLine: string;
-    evidence: RewindEvidencePointer[];
+    evidence: RewindEvidenceWithPointers;
+    support: { sessions: number; coverageMonths: number };
+    auditPrecisionEstimate?: number | null;
     cost: string;
     experiment: string;
     successMetric: string;
@@ -258,7 +290,7 @@ export interface RewindWrappedSummary {
     days: number;
     why: string;
     excerpt: string | null;
-    evidence: RewindEvidencePointer[];
+    evidence: RewindEvidenceWithPointers;
   }>;
   lifeHighlights: Array<{
     key: string;
@@ -270,7 +302,7 @@ export interface RewindWrappedSummary {
     confidence: number;
     level: "high" | "medium" | "low";
     excerpt: string | null;
-    evidence: RewindEvidencePointer[];
+    evidence: RewindEvidenceWithPointers;
   }>;
   bestMoments: Array<{
     key: string;
@@ -337,6 +369,7 @@ export interface RewindSummary {
   avgPromptChars: number | null;
   promptLengthChangePercent: number | null;
   behavior: RewindBehavior;
+  sessionsLite?: RewindSessionLite[];
   conversations: RewindConversationSummary[];
   wrapped: RewindWrappedSummary;
   privacyScan: {
@@ -1147,10 +1180,26 @@ const looksTechnicalContext = (textLower: string) => TECH_CONTEXT_PATTERN.test(t
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 0.99 ? 0.99 : n);
 
+const confidenceFromSupport = (
+  supportSessions: number,
+  coverageMonths: number,
+  auditPrecisionEstimate?: number | null,
+) => {
+  const sessionsScore = clamp01(supportSessions / 12);
+  const monthsScore = clamp01(coverageMonths / 3);
+  const base = clamp01(0.2 + sessionsScore * 0.5 + monthsScore * 0.3);
+
+  if (typeof auditPrecisionEstimate === "number" && Number.isFinite(auditPrecisionEstimate)) {
+    return clamp01(Math.min(base, clamp01(auditPrecisionEstimate)));
+  }
+
+  return base;
+};
+
 const makeSnippet = (raw: string, opts?: { maxWords?: number; maxChars?: number; redactNames?: boolean }): string | null => {
   const maxWords = opts?.maxWords ?? 10;
   const maxChars = opts?.maxChars ?? 96;
-  const cleaned = compressWhitespace(raw.replace(/["“”]/g, '"').trim());
+  const cleaned = compressWhitespace(raw.replace(/["""]/g, '"').trim());
   if (!cleaned) return null;
 
   const { sanitized } = anonymizeText(cleaned, { redactNames: opts?.redactNames ?? false });
@@ -1233,6 +1282,7 @@ export function createRewindAnalyzer(options?: {
   let totalConversations = 0;
   let totalUserMessages = 0;
   const conversations: RewindConversationSummary[] = [];
+  const sessionsLite: RewindSessionLite[] = [];
 
   // Forensic / deep-dive signals (session + message tagging)
   let totalSessions = 0;
@@ -1250,20 +1300,37 @@ export function createRewindAnalyzer(options?: {
 
   const openerCounts = new Map<
     string,
-    { key: string; label: string; count: number; excerpts: Set<string>; evidence: Map<string, RewindEvidencePointer> }
+    {
+      key: string;
+      label: string;
+      count: number;
+      sessionIds: Set<string>;
+      excerpts: Set<string>;
+      evidence: Map<string, RewindEvidencePointer>;
+    }
   >();
 
   const endingCounts = new Map<
     string,
-    { key: string; label: string; count: number; evidence: Map<string, RewindEvidencePointer> }
+    { key: string; label: string; count: number; sessionIds: Set<string>; evidence: Map<string, RewindEvidencePointer> }
   >();
 
   const openingPhraseCounts = new Map<string, number>();
 
   const loopCounts = new Map<
     string,
-    { key: string; title: string; count: number; evidence: Map<string, RewindEvidencePointer> }
+    {
+      key: string;
+      title: string;
+      count: number;
+      sessionIds: Set<string>;
+      nearMissSessionIds: Set<string>;
+      months: Set<string>;
+      evidence: Map<string, RewindEvidencePointer>;
+    }
   >();
+
+  const sessionIdsByConversation = new Map<string, string[]>();
 
   const privacyScan: RewindSummary["privacyScan"] = {
     emails: 0,
@@ -1373,7 +1440,8 @@ export function createRewindAnalyzer(options?: {
     if (!convRecord) return;
 
     const conversationIdRaw = convRecord.id ?? convRecord.conversation_id ?? asRecord(convRecord.conversation)?.id;
-    const conversationId = typeof conversationIdRaw === "string" && conversationIdRaw.trim().length ? conversationIdRaw.trim() : null;
+    const conversationId =
+      typeof conversationIdRaw === "string" && conversationIdRaw.trim().length ? conversationIdRaw.trim() : null;
 
     const titleRaw = convRecord.title;
     const title = typeof titleRaw === "string" ? titleRaw : "";
@@ -1390,6 +1458,11 @@ export function createRewindAnalyzer(options?: {
     }
 
     const messages = extractConversationMessages(convRecord);
+    const conversationKey =
+      conversationId ??
+      `conv:${stableHash(
+        `${titleSafeLower}|${String(convRecord.create_time ?? asRecord(convRecord.conversation)?.create_time ?? "")}|${messages.length}`,
+      )}`;
     let conversationHasIncluded = false;
     const conversationHabitCounts = new Map<string, number>();
     let conversationSpicy = 0;
@@ -1423,10 +1496,14 @@ export function createRewindAnalyzer(options?: {
     let sessionPromptChars = 0;
     let sessionWinSignals = 0;
     let sessionFrictionSignals = 0;
+    let sessionIndecisionSignals = 0;
+    let sessionPerfectionSignals = 0;
+    let sessionReassuranceSignals = 0;
     let sessionLastWinIdx: number | null = null;
     let sessionLastFrictionIdx: number | null = null;
     let sessionFirstTags: RewindMessageTags | null = null;
     let sessionFirstSnippet: string | null = null;
+    let sessionOpenerFingerprint: string | null = null;
     let sessionFirstMsgId: string | null = null;
     let sessionFirstDay: string | null = null;
     let sessionLastDay: string | null = null;
@@ -1465,6 +1542,13 @@ export function createRewindAnalyzer(options?: {
       totalSessions += 1;
       sessionPromptsSum += sessionUserMessages;
 
+      const sessionMonth =
+        sessionStartMs != null
+          ? formatMonthKeyLocal(new Date(sessionStartMs))
+          : sessionFirstDay
+            ? sessionFirstDay.slice(0, 7)
+            : null;
+
       const durationMins =
         sessionStartMs != null && sessionLastMs != null && sessionLastMs >= sessionStartMs
           ? Math.round((sessionLastMs - sessionStartMs) / 60000)
@@ -1476,13 +1560,42 @@ export function createRewindAnalyzer(options?: {
 
       const endingResolved =
         sessionLastWinIdx != null && (sessionLastFrictionIdx == null || sessionLastWinIdx > sessionLastFrictionIdx);
-      const ending = endingResolved ? "resolved" : sessionUserMessages >= 2 ? "abandoned" : "unknown";
+      const ending: RewindSessionEnding =
+        endingResolved ? "resolved" : sessionUserMessages >= 2 ? "abandoned" : "unknown";
 
       if (ending === "resolved") resolvedSessions += 1;
       if (ending === "abandoned") abandonedSessions += 1;
 
-      const openingIntent = sessionFirstTags?.intents[0] ?? null;
-      const openingDomain = sessionFirstTags?.domains[0] ?? null;
+      const openingIntent = sessionFirstTags?.intents[0] ?? "info_seeking";
+      const openingDomain = sessionFirstTags?.domains[0] ?? "other";
+
+      const openerFingerprint =
+        sessionOpenerFingerprint ??
+        stableHash(`${openingIntent}|${openingDomain}|${sessionFirstMsgId ?? sessionIndex}`);
+      const sessionId = `s:${stableHash(
+        `${conversationKey}|${sessionFirstMsgId ?? "nomsg"}|${sessionStartMs ?? "nostart"}|${sessionIndex}`,
+      )}`;
+
+      sessionsLite.push({
+        sessionId,
+        month: sessionMonth,
+        ending,
+        intent: openingIntent,
+        domain: openingDomain,
+        userMessages: sessionUserMessages,
+        promptCharsTotal: sessionPromptChars,
+        signals: {
+          indecision: sessionIndecisionSignals,
+          perfection: sessionPerfectionSignals,
+          friction: sessionFrictionSignals,
+          reassurance: sessionReassuranceSignals,
+        },
+        openerFingerprint,
+      });
+
+      const convoSessionIds = sessionIdsByConversation.get(conversationKey) ?? [];
+      convoSessionIds.push(sessionId);
+      sessionIdsByConversation.set(conversationKey, convoSessionIds);
 
       const intentLabel = (key: ForensicIntent) =>
         ({
@@ -1519,14 +1632,17 @@ export function createRewindAnalyzer(options?: {
             key: openerKey,
             label,
             count: 0,
+            sessionIds: new Set<string>(),
             excerpts: new Set<string>(),
             evidence: new Map<string, RewindEvidencePointer>(),
           };
         current.count += 1;
+        current.sessionIds.add(sessionId);
         if (sessionFirstSnippet) current.excerpts.add(sessionFirstSnippet);
         recordEvidencePointer(
           current.evidence,
           {
+            sessionId,
             conversationId,
             msgId: sessionFirstMsgId,
             startDay: sessionFirstDay,
@@ -1541,11 +1657,13 @@ export function createRewindAnalyzer(options?: {
       const endingKey = ending;
       const endingLabel = ending === "resolved" ? "Resolved" : ending === "abandoned" ? "Abandoned" : "One-and-done";
       const endingEntry =
-        endingCounts.get(endingKey) ?? { key: endingKey, label: endingLabel, count: 0, evidence: new Map() };
+        endingCounts.get(endingKey) ?? { key: endingKey, label: endingLabel, count: 0, sessionIds: new Set<string>(), evidence: new Map() };
       endingEntry.count += 1;
+      endingEntry.sessionIds.add(sessionId);
       recordEvidencePointer(
         endingEntry.evidence,
         {
+          sessionId,
           conversationId,
           msgId: sessionFirstMsgId,
           startDay: sessionFirstDay,
@@ -1567,15 +1685,33 @@ export function createRewindAnalyzer(options?: {
       inc(forensicCognitiveModeCounts, sessionMode, 1);
 
       // Loops (session-scoped, not word-count scoped)
-      const recordLoop = (key: string, title: string, pointer: RewindEvidencePointer) => {
+      const recordLoop = (key: string, title: string, pointer: RewindEvidencePointer, mode: "support" | "near_miss") => {
         const entry =
-          loopCounts.get(key) ?? { key, title, count: 0, evidence: new Map<string, RewindEvidencePointer>() };
-        entry.count += 1;
-        recordEvidencePointer(entry.evidence, pointer, 18);
+          loopCounts.get(key) ?? {
+            key,
+            title,
+            count: 0,
+            sessionIds: new Set<string>(),
+            nearMissSessionIds: new Set<string>(),
+            months: new Set<string>(),
+            evidence: new Map<string, RewindEvidencePointer>(),
+          };
+
+        const sid = pointer.sessionId;
+        if (mode === "support") {
+          entry.count += 1;
+          if (sid) entry.sessionIds.add(sid);
+          if (sessionMonth) entry.months.add(sessionMonth);
+          recordEvidencePointer(entry.evidence, pointer, 18);
+        } else if (sid) {
+          entry.nearMissSessionIds.add(sid);
+        }
+
         loopCounts.set(key, entry);
       };
 
       const pointerBase: RewindEvidencePointer = {
+        sessionId,
         conversationId,
         msgId: sessionFirstMsgId,
         startDay: sessionFirstDay,
@@ -1583,20 +1719,45 @@ export function createRewindAnalyzer(options?: {
         snippets: sessionFirstSnippet ? [sessionFirstSnippet] : ["signal"],
       };
 
-      if (sessionStartCue && ending !== "resolved") {
-        recordLoop("start_friction", "The starting friction loop", { ...pointerBase, snippets: ["help me start"] });
+      if (sessionStartCue) {
+        recordLoop(
+          "start_friction",
+          "The starting friction loop",
+          { ...pointerBase, snippets: ["help me start"] },
+          ending === "resolved" ? "near_miss" : "support",
+        );
       }
-      if (sessionHasReassurance && ending !== "resolved") {
-        recordLoop("reassurance", "The reassurance loop", { ...pointerBase, snippets: ["is this normal"] });
+      if (sessionHasReassurance) {
+        recordLoop(
+          "reassurance",
+          "The reassurance loop",
+          { ...pointerBase, snippets: ["is this normal"] },
+          ending === "resolved" ? "near_miss" : "support",
+        );
       }
-      if (sessionHasDecision && ending !== "resolved") {
-        recordLoop("decision_paralysis", "Decision paralysis", { ...pointerBase, snippets: ["should I"] });
+      if (sessionHasDecision) {
+        recordLoop(
+          "decision_paralysis",
+          "Decision paralysis",
+          { ...pointerBase, snippets: ["should I"] },
+          ending === "resolved" ? "near_miss" : "support",
+        );
       }
-      if (sessionHasRewriteCue && ending !== "resolved" && sessionUserMessages >= 10) {
-        recordLoop("perfection", "The perfection loop", { ...pointerBase, snippets: ["rewrite"] });
+      if (sessionHasRewriteCue && sessionUserMessages >= 10) {
+        recordLoop(
+          "perfection",
+          "The perfection loop",
+          { ...pointerBase, snippets: ["rewrite"] },
+          ending === "resolved" ? "near_miss" : "support",
+        );
       }
-      if (sessionHasConflict && ending !== "resolved") {
-        recordLoop("avoidance", "The avoidance loop", { ...pointerBase, snippets: ["what should I say"] });
+      if (sessionHasConflict) {
+        recordLoop(
+          "avoidance",
+          "The avoidance loop",
+          { ...pointerBase, snippets: ["what should I say"] },
+          ending === "resolved" ? "near_miss" : "support",
+        );
       }
 
       // Reset session state
@@ -1607,10 +1768,14 @@ export function createRewindAnalyzer(options?: {
       sessionPromptChars = 0;
       sessionWinSignals = 0;
       sessionFrictionSignals = 0;
+      sessionIndecisionSignals = 0;
+      sessionPerfectionSignals = 0;
+      sessionReassuranceSignals = 0;
       sessionLastWinIdx = null;
       sessionLastFrictionIdx = null;
       sessionFirstTags = null;
       sessionFirstSnippet = null;
+      sessionOpenerFingerprint = null;
       sessionFirstMsgId = null;
       sessionFirstDay = null;
       sessionLastDay = null;
@@ -1806,6 +1971,9 @@ export function createRewindAnalyzer(options?: {
         const safeOpener = anonymizeText(stripCodeBlocks(rawTextSafe), { redactNames: true }).sanitized;
         const words = safeOpener.split(/\s+/).filter(Boolean).slice(0, 4);
         const phrase = words.join(" ").toLowerCase();
+        sessionOpenerFingerprint = stableHash(
+          `${tags.intents[0] ?? ""}|${tags.domains[0] ?? ""}|${phrase || safeOpener.slice(0, 80).toLowerCase()}`,
+        );
         if (phrase.length >= 6 && phrase.length <= 56) {
           openingPhraseCounts.set(phrase, (openingPhraseCounts.get(phrase) ?? 0) + 1);
         }
@@ -1815,10 +1983,16 @@ export function createRewindAnalyzer(options?: {
         }
       }
 
-      if (tags.helpTypes.includes("reassurance")) sessionHasReassurance = true;
+      if (tags.helpTypes.includes("reassurance")) {
+        sessionHasReassurance = true;
+        sessionReassuranceSignals += 1;
+      }
       if (tags.intents.includes("decision_support")) sessionHasDecision = true;
       if (tags.intents.includes("conflict_scripting")) sessionHasConflict = true;
-      if (/\b(rewrite|rephrase|edit)\b/i.test(rawTextSafe)) sessionHasRewriteCue = true;
+      if (/\b(rewrite|rephrase|edit)\b/i.test(rawTextSafe)) {
+        sessionHasRewriteCue = true;
+        sessionPerfectionSignals += 1;
+      }
 
       const len = trimmed.length;
       totalPromptChars += len;
@@ -1904,6 +2078,7 @@ export function createRewindAnalyzer(options?: {
           }
         }
         conversationIndecisionSignals += messageIndecisionHits;
+        sessionIndecisionSignals += messageIndecisionHits;
       }
 
       const hasHedge = HEDGE_PATTERNS.some((p) => p.test(lowered));
@@ -3293,23 +3468,37 @@ export function createRewindAnalyzer(options?: {
           days: burst.days,
           why,
           excerpt: null,
-          evidence: conversations
-            .filter((c) => c.startDay && c.endDay && c.stack.includes(hole.key))
-            .filter((c) => {
-              if (!c.startDay) return false;
-              const ms = dayKeyUtcMs(c.startDay);
-              const start = dayKeyUtcMs(burst.startKey);
-              const end = dayKeyUtcMs(burst.endKey);
-              if (ms == null || start == null || end == null) return true;
-              return ms >= start && ms <= end;
-            })
-            .slice(0, 8)
-            .map((c) => ({
-              conversationId: c.conversationId,
-              startDay: c.startDay,
-              endDay: c.endDay,
-              snippets: [hole.key],
-            })),
+          evidence: (() => {
+            const pointers = conversations
+              .filter((c) => c.startDay && c.endDay && c.stack.includes(hole.key))
+              .filter((c) => {
+                if (!c.startDay) return false;
+                const ms = dayKeyUtcMs(c.startDay);
+                const start = dayKeyUtcMs(burst.startKey);
+                const end = dayKeyUtcMs(burst.endKey);
+                if (ms == null || start == null || end == null) return true;
+                return ms >= start && ms <= end;
+              })
+              .slice(0, 8)
+              .map((c) => {
+                const sessionId = c.conversationId ? sessionIdsByConversation.get(c.conversationId)?.[0] ?? null : null;
+                return {
+                  sessionId,
+                  conversationId: c.conversationId,
+                  startDay: c.startDay,
+                  endDay: c.endDay,
+                  snippets: [hole.key],
+                };
+              });
+            const sessionIds = Array.from(
+              new Set(
+                pointers
+                  .map((p) => p.sessionId)
+                  .filter((id): id is string => typeof id === "string" && id.length > 0),
+              ),
+            );
+            return { sessionIds, pointers };
+          })(),
         };
       });
     })();
@@ -3585,10 +3774,22 @@ export function createRewindAnalyzer(options?: {
         if (c.days.size <= 1 && level === "high") level = "medium";
 
         const month = peakMonthLabel(c.months);
-        const evidence = Array.from(c.evidence.values())
+        const pointers = Array.from(c.evidence.values())
           .sort((a, b) => (dayKeyUtcMs(a.startDay ?? "") ?? 0) - (dayKeyUtcMs(b.startDay ?? "") ?? 0))
-          .slice(0, 8);
-        const excerpt = evidence.flatMap((e) => e.snippets).filter(Boolean)[0] ?? null;
+          .slice(0, 8)
+          .map((e) => {
+            const sessionId = e.conversationId ? sessionIdsByConversation.get(e.conversationId)?.[0] ?? null : null;
+            return { ...e, sessionId };
+          });
+        const sessionIds = Array.from(
+          new Set(
+            pointers
+              .map((p) => p.sessionId)
+              .filter((id): id is string => typeof id === "string" && id.length > 0),
+          ),
+        );
+        const evidence: RewindEvidenceWithPointers = { sessionIds, pointers };
+        const excerpt = pointers.flatMap((e) => e.snippets).filter(Boolean)[0] ?? null;
 
         out.push({
           key: c.key,
@@ -4005,6 +4206,19 @@ export function createRewindAnalyzer(options?: {
       const avgSessionMins = sessionDurationMinsCount > 0 ? Math.round(sessionDurationMinsSum / sessionDurationMinsCount) : null;
       const avgPromptsPerSession = totalSessions > 0 ? Math.round(sessionPromptsSum / totalSessions) : null;
 
+      const topicClusterCounts = new Map<string, number>();
+      for (const [key, count] of topicCounts.entries()) {
+        topicClusterCounts.set(key, count);
+      }
+      const knownTopicTotal = Array.from(topicClusterCounts.values()).reduce((sum, v) => sum + v, 0);
+      const unknownTopicTotal = Math.max(0, totalConversations - knownTopicTotal);
+      if (unknownTopicTotal > 0) topicClusterCounts.set("other", unknownTopicTotal);
+
+      const topicClusterLabel = (key: string) =>
+        key === "other" ? "Other" : TOPIC_BUCKETS.find((b) => b.key === key)?.label ?? key;
+
+      const topicClusters = dist(topicClusterCounts, topicClusterLabel);
+
       const topOpeners = Array.from(openerCounts.values())
         .sort((a, b) => b.count - a.count)
         .slice(0, 5)
@@ -4012,13 +4226,20 @@ export function createRewindAnalyzer(options?: {
           label: o.label,
           count: o.count,
           excerpt: Array.from(o.excerpts)[0] ?? null,
-          evidence: Array.from(o.evidence.values()).slice(0, 3),
+          evidence: {
+            sessionIds: Array.from(o.sessionIds),
+            pointers: Array.from(o.evidence.values()).slice(0, 3),
+          },
         }));
 
       const topEndings = Array.from(endingCounts.values())
         .sort((a, b) => b.count - a.count)
         .slice(0, 3)
-        .map((e) => ({ label: e.label, count: e.count, evidence: Array.from(e.evidence.values()).slice(0, 3) }));
+        .map((e) => ({
+          label: e.label,
+          count: e.count,
+          evidence: { sessionIds: Array.from(e.sessionIds), pointers: Array.from(e.evidence.values()).slice(0, 3) },
+        }));
 
       const exploratorySessions = forensicCognitiveModeCounts.get("exploratory") ?? 0;
       const convergentSessions = forensicCognitiveModeCounts.get("convergent") ?? 0;
@@ -4082,8 +4303,15 @@ export function createRewindAnalyzer(options?: {
         .sort((a, b) => b.count - a.count)
         .slice(0, 5)
         .map((l) => {
-          const evidence = Array.from(l.evidence.values()).slice(0, 3);
-          const confidence = clamp01(0.45 + Math.min(l.count / 14, 0.5));
+          const pointers = Array.from(l.evidence.values()).slice(0, 3);
+          const nearMissSessionIds = Array.from(l.nearMissSessionIds);
+          const evidence: RewindEvidenceWithPointers = {
+            sessionIds: Array.from(l.sessionIds),
+            nearMissSessionIds: nearMissSessionIds.length ? nearMissSessionIds : undefined,
+            pointers,
+          };
+          const supportSessions = l.sessionIds.size;
+          const coverageMonths = l.months.size;
 
           const script = (() => {
             switch (l.key) {
@@ -4093,6 +4321,7 @@ export function createRewindAnalyzer(options?: {
                   experiment:
                     "Start every 'start' session with: 3 options + 1 recommended path + a 10-minute v1. Then force a v2.",
                   metric: `Raise your resolved-session rate from ${resolvedRate}% to ${Math.min(99, resolvedRate + 10)}%.`,
+                  auditPrecisionEstimate: 0.86,
                 };
               case "reassurance":
                 return {
@@ -4100,6 +4329,7 @@ export function createRewindAnalyzer(options?: {
                   experiment:
                     "When you want reassurance, ask for a 3-step plan + one tiny action to take today (not a pep talk).",
                   metric: `Reduce abandoned sessions by 10% (baseline: ${abandonedSessions.toLocaleString()} abandoned).`,
+                  auditPrecisionEstimate: 0.8,
                 };
               case "decision_paralysis":
                 return {
@@ -4107,6 +4337,7 @@ export function createRewindAnalyzer(options?: {
                   experiment:
                     "Use a decision prompt: constraints first, then 'pick 1', then 'tell me what to do next in 20 minutes'.",
                   metric: `Increase decision-mode sessions by 10% without lowering your resolved rate (${resolvedRate}%).`,
+                  auditPrecisionEstimate: 0.78,
                 };
               case "perfection":
                 return {
@@ -4114,6 +4345,7 @@ export function createRewindAnalyzer(options?: {
                   experiment:
                     "Set a hard rule: 2 drafts max. After v2, you send/ship, then you iterate based on reality.",
                   metric: `Increase resolved sessions while lowering prompts-per-session (baseline: ${avgPromptsPerSession ?? 0}).`,
+                  auditPrecisionEstimate: 0.74,
                 };
               case "avoidance":
                 return {
@@ -4121,15 +4353,19 @@ export function createRewindAnalyzer(options?: {
                   experiment:
                     "Ask for 3 versions, pick one, and send it within 10 minutes. Then debrief what happened.",
                   metric: "More sessions that end with a send / done / solved signal.",
+                  auditPrecisionEstimate: 0.76,
                 };
               default:
                 return {
                   cost: "It keeps pulling you back in.",
                   experiment: "Run a smaller loop: ask 3 questions, pick 1 action, do it, then come back.",
                   metric: "More sessions ending with a win signal.",
+                  auditPrecisionEstimate: 0.7,
                 };
             }
           })();
+
+          const confidence = confidenceFromSupport(supportSessions, coverageMonths, script.auditPrecisionEstimate);
 
           return {
             key: l.key,
@@ -4137,6 +4373,8 @@ export function createRewindAnalyzer(options?: {
             observation: `This showed up in ${l.count.toLocaleString()} sessions.`,
             evidenceLine: `${l.count.toLocaleString()} sessions (not a one-off).`,
             evidence,
+            support: { sessions: supportSessions, coverageMonths },
+            auditPrecisionEstimate: script.auditPrecisionEstimate,
             cost: script.cost,
             experiment: script.experiment,
             successMetric: script.metric,
@@ -4208,9 +4446,10 @@ export function createRewindAnalyzer(options?: {
             title: "Your opening move",
             observation: `Most sessions started as ${topOpener.label.toLowerCase()}.`,
             evidence: {
+              sessionIds: topOpener.evidence.sessionIds,
               counts: [`Top opening move: ${topOpener.label} (${topOpener.count.toLocaleString()} sessions).`],
               excerpts: topOpener.excerpt ? [topOpener.excerpt] : [],
-              pointers: topOpener.evidence.slice(0, 3),
+              pointers: topOpener.evidence.pointers.slice(0, 3),
             },
             interpretation: "You use AI to get traction fast: direction first, details second.",
             cost: "When the opener is fuzzy, the rest of the session drifts.",
@@ -4227,9 +4466,11 @@ export function createRewindAnalyzer(options?: {
             title: topLoop.title,
             observation: topLoop.observation,
             evidence: {
+              sessionIds: topLoop.evidence.sessionIds,
+              nearMissSessionIds: topLoop.evidence.nearMissSessionIds,
               counts: [topLoop.evidenceLine],
               excerpts: [],
-              pointers: topLoop.evidence.slice(0, 3),
+              pointers: topLoop.evidence.pointers.slice(0, 3),
             },
             interpretation: "This isn't a flaw. It's a predictable pattern you can design around.",
             cost: topLoop.cost,
@@ -4245,7 +4486,7 @@ export function createRewindAnalyzer(options?: {
             key: "insight:growth",
             title: "Your growth signal",
             observation: upgrade.title + ".",
-            evidence: { counts: upgrade.delta ? [upgrade.delta] : [], excerpts: [], pointers: [] },
+            evidence: { sessionIds: [], counts: upgrade.delta ? [upgrade.delta] : [], excerpts: [], pointers: [] },
             interpretation: upgrade.line,
             cost: "If you don't notice the upgrade, you keep using the old playbook.",
             experiment: "Pick one prompt habit to lock in for 30 days (constraints, decision prompts, or v2 rule).",
@@ -4259,7 +4500,7 @@ export function createRewindAnalyzer(options?: {
             key: "insight:relationship",
             title: "Your AI relationship style",
             observation: `You mostly treated AI like a ${relationshipStyle.primary.toLowerCase()}.`,
-            evidence: { counts: relationshipStyle.roles.slice(0, 2).map((r) => `${r.role}: ${r.pct}%`), excerpts: [], pointers: [] },
+            evidence: { sessionIds: [], counts: relationshipStyle.roles.slice(0, 2).map((r) => `${r.role}: ${r.pct}%`), excerpts: [], pointers: [] },
             interpretation: "You don't outsource thinking. You outsource friction.",
             cost: "When you ask for vibes, you get vibes back.",
             experiment: "When it matters, ask for: assumptions → options → a recommendation → next steps.",
@@ -4275,6 +4516,9 @@ export function createRewindAnalyzer(options?: {
             title: "The boss fight you replayed",
             observation: `${boss.title}. It kept showing up.`,
             evidence: {
+              sessionIds: boss.evidence
+                .map((e) => e.sessionId)
+                .filter((id): id is string => typeof id === "string" && id.length > 0),
               counts: [`${boss.chats.toLocaleString()} chats · peak: ${boss.peak ?? "unknown"}`],
               excerpts: [boss.example],
               pointers: boss.evidence.slice(0, 3),
@@ -4353,7 +4597,7 @@ export function createRewindAnalyzer(options?: {
         resolvedSessions,
         abandonedSessions,
         intents: dist(forensicIntentCounts, intentLabel),
-        domains: dist(forensicDomainCounts, domainLabel),
+        topicClusters,
         cognitiveModes: dist(forensicCognitiveModeCounts, cognitiveLabel),
         tones: dist(forensicToneCounts, toneLabel),
         helpTypes: dist(forensicHelpTypeCounts, helpLabel),
@@ -4408,6 +4652,7 @@ export function createRewindAnalyzer(options?: {
       avgPromptChars,
       promptLengthChangePercent,
       behavior,
+      sessionsLite,
       conversations,
       wrapped,
       privacyScan,

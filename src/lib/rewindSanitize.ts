@@ -36,12 +36,16 @@ export const sanitizeRewindForStorage = (rewind: RewindSummary): RewindSummary =
           evidence: [],
         })),
       },
-      rabbitHoles: rewind.wrapped.rabbitHoles.map((h) => ({ ...h, excerpt: null, evidence: [] })),
+      rabbitHoles: rewind.wrapped.rabbitHoles.map((h) => ({
+        ...h,
+        excerpt: null,
+        evidence: { sessionIds: h.evidence.sessionIds, nearMissSessionIds: h.evidence.nearMissSessionIds, pointers: [] },
+      })),
       lifeHighlights: rewind.wrapped.lifeHighlights.map((h) => ({
         ...h,
         titlePrivate: null,
         excerpt: null,
-        evidence: [],
+        evidence: { sessionIds: h.evidence.sessionIds, nearMissSessionIds: h.evidence.nearMissSessionIds, pointers: [] },
       })),
       bestMoments: rewind.wrapped.bestMoments.map((m) => ({ ...m, excerpt: null, evidence: [] })),
       deepDive: {
@@ -51,9 +55,12 @@ export const sanitizeRewindForStorage = (rewind: RewindSummary): RewindSummary =
           topOpeners: rewind.wrapped.deepDive.useMap.topOpeners.map((o) => ({
             ...o,
             excerpt: null,
-            evidence: [],
+            evidence: { sessionIds: o.evidence.sessionIds, nearMissSessionIds: o.evidence.nearMissSessionIds, pointers: [] },
           })),
-          topEndings: rewind.wrapped.deepDive.useMap.topEndings.map((e) => ({ ...e, evidence: [] })),
+          topEndings: rewind.wrapped.deepDive.useMap.topEndings.map((e) => ({
+            ...e,
+            evidence: { sessionIds: e.evidence.sessionIds, nearMissSessionIds: e.evidence.nearMissSessionIds, pointers: [] },
+          })),
           ratios: {
             ...rewind.wrapped.deepDive.useMap.ratios,
             line: redactForStorage(rewind.wrapped.deepDive.useMap.ratios.line),
@@ -75,7 +82,7 @@ export const sanitizeRewindForStorage = (rewind: RewindSummary): RewindSummary =
           ...l,
           observation: redactForStorage(l.observation),
           evidenceLine: redactForStorage(l.evidenceLine),
-          evidence: [],
+          evidence: { sessionIds: l.evidence.sessionIds, nearMissSessionIds: l.evidence.nearMissSessionIds, pointers: [] },
           cost: redactForStorage(l.cost),
           experiment: redactForStorage(l.experiment),
           successMetric: redactForStorage(l.successMetric),
@@ -94,6 +101,8 @@ export const sanitizeRewindForStorage = (rewind: RewindSummary): RewindSummary =
           title: redactForStorage(i.title),
           observation: redactForStorage(i.observation),
           evidence: {
+            sessionIds: i.evidence.sessionIds,
+            nearMissSessionIds: i.evidence.nearMissSessionIds,
             counts: i.evidence.counts.map(redactForStorage),
             excerpts: [],
             pointers: [],

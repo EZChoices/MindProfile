@@ -258,7 +258,7 @@ export function generateRewindBangers(
     topHighlight.level === "high" &&
     (topHighlight.type === "language" || topHighlight.type === "fitness" || topHighlight.type === "food")
   ) {
-    const evidenceChats = topHighlight.evidence.length;
+    const evidenceChats = topHighlight.evidence.sessionIds.length;
     const title = includePersonalDetails && topHighlight.titlePrivate ? topHighlight.titlePrivate : topHighlight.title;
     const line1 = bySpice(spice, {
       mild: `${title}.`,

@@ -22,11 +22,44 @@ const isStringArray = (value: unknown): value is string[] =>
 
 const isEvidencePointer = (value: unknown) => {
   if (!isRecord(value)) return false;
+  const record = value as Record<string, unknown>;
+  const sessionId = record.sessionId;
+  const msgId = record.msgId;
   return (
+    (sessionId === undefined || isNullableString(sessionId)) &&
+    (msgId === undefined || isNullableString(msgId)) &&
     isNullableString(value.conversationId) &&
     isNullableString(value.startDay) &&
     isNullableString(value.endDay) &&
     isStringArray(value.snippets)
+  );
+};
+
+const isEvidenceBundle = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  if (!isStringArray(value.sessionIds)) return false;
+  const nearMiss = (value as Record<string, unknown>).nearMissSessionIds;
+  if (nearMiss !== undefined && !isStringArray(nearMiss)) return false;
+  return Array.isArray(value.pointers) && value.pointers.every(isEvidencePointer);
+};
+
+const isSessionLite = (value: unknown) => {
+  if (!isRecord(value)) return false;
+  const signals = value.signals;
+  return (
+    typeof value.sessionId === "string" &&
+    isNullableString(value.month) &&
+    typeof value.ending === "string" &&
+    typeof value.intent === "string" &&
+    typeof value.domain === "string" &&
+    isFiniteNumber(value.userMessages) &&
+    isFiniteNumber(value.promptCharsTotal) &&
+    typeof value.openerFingerprint === "string" &&
+    isRecord(signals) &&
+    isFiniteNumber(signals.indecision) &&
+    isFiniteNumber(signals.perfection) &&
+    isFiniteNumber(signals.friction) &&
+    isFiniteNumber(signals.reassurance)
   );
 };
 
@@ -159,8 +192,7 @@ const isRabbitHole = (value: unknown) => {
     isFiniteNumber(value.days) &&
     typeof value.why === "string" &&
     isNullableString(value.excerpt) &&
-    Array.isArray(value.evidence) &&
-    value.evidence.every(isEvidencePointer)
+    isEvidenceBundle(value.evidence)
   );
 };
 
@@ -176,8 +208,7 @@ const isLifeHighlight = (value: unknown) => {
     isFiniteNumber(value.confidence) &&
     typeof value.level === "string" &&
     isNullableString(value.excerpt) &&
-    Array.isArray(value.evidence) &&
-    value.evidence.every(isEvidencePointer)
+    isEvidenceBundle(value.evidence)
   );
 };
 
@@ -312,6 +343,8 @@ const isRewindSummary = (value: unknown): value is RewindSummary => {
     isNullableNumber(value.avgPromptChars) &&
     isNullableNumber(value.promptLengthChangePercent) &&
     isBehavior(value.behavior) &&
+    (value.sessionsLite === undefined ||
+      (Array.isArray(value.sessionsLite) && value.sessionsLite.every(isSessionLite))) &&
     Array.isArray(value.conversations) &&
     value.conversations.every(isConversationSummary) &&
     isWrapped(value.wrapped)

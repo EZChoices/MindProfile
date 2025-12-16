@@ -393,6 +393,10 @@ export default function RewindPage() {
 
   const visibleRabbitHoles = rewind ? rewind.wrapped.rabbitHoles.filter((h) => !dismissedRabbitHolesSet.has(h.key)) : [];
 
+  const allLoops = rewind ? rewind.wrapped.deepDive.loops : [];
+  const highConfidenceLoops = allLoops.filter((loop) => loop.support.sessions >= 12 || loop.support.coverageMonths >= 3);
+  const lowConfidenceLoops = allLoops.filter((loop) => loop.support.sessions < 12 && loop.support.coverageMonths < 3);
+
   const mindProfileYearBullets = (() => {
     if (!rewind) return [];
     const name = displayName.trim();
@@ -1039,6 +1043,57 @@ export default function RewindPage() {
                     </li>
                   ))}
                 </ul>
+
+                {false && (
+                  <details className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                      Low confidence detections
+                    </summary>
+                    <ul className="mt-4 space-y-4 text-sm text-slate-100">
+                      {lowConfidenceLoops.map((loop) => (
+                        <li key={`low-${loop.key}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <div className="text-base font-semibold text-white">{loop.title}</div>
+                              <p className="muted mt-1 text-xs text-slate-200">{loop.observation}</p>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-lg font-semibold text-white">
+                                {Math.round(loop.confidence * 100)}%
+                              </div>
+                              <p className="muted mt-1 text-xs text-slate-200">confidence</p>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-3 text-sm text-slate-100">
+                            <p>
+                              <span className="muted text-slate-200">Cost:</span> {loop.cost}
+                            </p>
+                            <p>
+                              <span className="muted text-slate-200">Experiment:</span> {loop.experiment}
+                            </p>
+                            <p>
+                              <span className="muted text-slate-200">Metric:</span> {loop.successMetric}
+                            </p>
+                          </div>
+                          {includeExamples && allowRedactedExcerpts && loop.evidence.pointers.length > 0 && (
+                            <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                              <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                                Evidence (private)
+                              </summary>
+                              <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                                {loop.evidence.pointers.slice(0, 3).map((e, idx) => (
+                                  <li key={`${loop.key}-ev-low-${idx}`}>
+                                    {(e.startDay ?? e.endDay ?? "date")} ú {formatExcerpt(e.snippets[0] ?? "signal")}
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
             )}
 
@@ -1127,9 +1182,9 @@ export default function RewindPage() {
                   </ul>
                 </div>
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">By domain</div>
+                  <div className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-200">By topic</div>
                   <ul className="mt-3 space-y-2 text-sm text-slate-100">
-                    {rewind.wrapped.deepDive.useMap.domains.slice(0, 6).map((row) => (
+                    {rewind.wrapped.deepDive.useMap.topicClusters.slice(0, 6).map((row) => (
                       <li key={row.key} className="flex items-center justify-between gap-3">
                         <span>{row.label}</span>
                         <span className="muted text-xs text-slate-200">{row.pct}%</span>
@@ -1218,15 +1273,21 @@ export default function RewindPage() {
               </div>
             )}
 
-            {rewind.wrapped.deepDive.loops.length > 0 && (
+            {allLoops.length > 0 && (
               <div className="glass card-border rounded-3xl p-6 sm:p-8">
                 <div className="text-xs uppercase tracking-[0.2em] text-emerald-200">Loop detector</div>
                 <p className="muted mt-3 text-sm text-slate-100">
                   Where you get stuck - and what to try next.
                 </p>
 
+                {highConfidenceLoops.length === 0 && (
+                  <p className="mt-5 text-sm text-slate-100">
+                    Not enough data yet for high-confidence loop detections in this window.
+                  </p>
+                )}
+
                 <ul className="mt-5 space-y-4 text-sm text-slate-100">
-                  {rewind.wrapped.deepDive.loops.map((loop) => (
+                  {highConfidenceLoops.map((loop) => (
                     <li key={loop.key} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="flex items-start justify-between gap-4">
                         <div>
@@ -1251,13 +1312,20 @@ export default function RewindPage() {
                           <span className="muted text-slate-200">Metric:</span> {loop.successMetric}
                         </p>
                       </div>
-                      {includeExamples && allowRedactedExcerpts && loop.evidence.length > 0 && (
+                      {includeExamples &&
+                        loop.evidence.sessionIds.length > 0 &&
+                        !(allowRedactedExcerpts && loop.evidence.pointers.length > 0) && (
+                          <p className="muted mt-3 text-xs text-slate-200">
+                            Evidence: {loop.evidence.sessionIds.length.toLocaleString()} sessions
+                          </p>
+                        )}
+                      {includeExamples && allowRedactedExcerpts && loop.evidence.pointers.length > 0 && (
                         <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
                           <summary className="cursor-pointer text-xs font-semibold text-slate-200">
                             Evidence (private)
                           </summary>
                           <ul className="mt-2 space-y-1 text-xs text-slate-200">
-                            {loop.evidence.slice(0, 3).map((e, idx) => (
+                            {loop.evidence.pointers.slice(0, 3).map((e, idx) => (
                               <li key={`${loop.key}-ev-${idx}`}>
                                 {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                               </li>
@@ -1268,6 +1336,64 @@ export default function RewindPage() {
                     </li>
                   ))}
                 </ul>
+
+                {lowConfidenceLoops.length > 0 && (
+                  <details className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <summary className="cursor-pointer text-sm font-semibold text-slate-100">
+                      Low confidence detections
+                    </summary>
+                    <ul className="mt-4 space-y-4 text-sm text-slate-100">
+                      {lowConfidenceLoops.map((loop) => (
+                        <li key={`low-${loop.key}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <div className="text-base font-semibold text-white">{loop.title}</div>
+                              <p className="muted mt-1 text-xs text-slate-200">{loop.observation}</p>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-lg font-semibold text-white">
+                                {Math.round(loop.confidence * 100)}%
+                              </div>
+                              <p className="muted mt-1 text-xs text-slate-200">confidence</p>
+                            </div>
+                          </div>
+                          <div className="mt-3 grid gap-3 text-sm text-slate-100">
+                            <p>
+                              <span className="muted text-slate-200">Cost:</span> {loop.cost}
+                            </p>
+                            <p>
+                              <span className="muted text-slate-200">Experiment:</span> {loop.experiment}
+                            </p>
+                            <p>
+                              <span className="muted text-slate-200">Metric:</span> {loop.successMetric}
+                            </p>
+                          </div>
+                          {includeExamples &&
+                            loop.evidence.sessionIds.length > 0 &&
+                            !(allowRedactedExcerpts && loop.evidence.pointers.length > 0) && (
+                              <p className="muted mt-3 text-xs text-slate-200">
+                                Evidence: {loop.evidence.sessionIds.length.toLocaleString()} sessions
+                              </p>
+                            )}
+                          {includeExamples && allowRedactedExcerpts && loop.evidence.pointers.length > 0 && (
+                            <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
+                              <summary className="cursor-pointer text-xs font-semibold text-slate-200">
+                                Evidence (private)
+                              </summary>
+                              <ul className="mt-2 space-y-1 text-xs text-slate-200">
+                                {loop.evidence.pointers.slice(0, 3).map((e, idx) => (
+                                  <li key={`${loop.key}-ev-low-${idx}`}>
+                                    {(e.startDay ?? e.endDay ?? "date")} ú {formatExcerpt(e.snippets[0] ?? "signal")}
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
               </div>
             )}
 
@@ -1462,13 +1588,20 @@ export default function RewindPage() {
                         {allowRedactedExcerpts && h.excerpt && (
                           <p className="muted mt-2 text-xs text-slate-200">"{formatExcerpt(h.excerpt)}"</p>
                         )}
-                        {allowRedactedExcerpts && h.evidence.length > 0 && (
+                        {includeExamples &&
+                          h.evidence.sessionIds.length > 0 &&
+                          !(allowRedactedExcerpts && h.evidence.pointers.length > 0) && (
+                            <p className="muted mt-2 text-xs text-slate-200">
+                              Evidence: {h.evidence.sessionIds.length.toLocaleString()} sessions
+                            </p>
+                          )}
+                        {allowRedactedExcerpts && h.evidence.pointers.length > 0 && (
                           <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
                             <summary className="cursor-pointer text-xs font-semibold text-slate-200">
                               Evidence (private)
                             </summary>
                             <ul className="mt-2 space-y-1 text-xs text-slate-200">
-                              {h.evidence.slice(0, 3).map((e, idx) => (
+                              {h.evidence.pointers.slice(0, 3).map((e, idx) => (
                                 <li key={`${h.key}-ev-${idx}`}>
                                   {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                                 </li>
@@ -1549,13 +1682,20 @@ export default function RewindPage() {
                       {includeExamples && allowRedactedExcerpts && hole.excerpt && (
                         <p className="muted mt-2 text-xs text-slate-200">"{formatExcerpt(hole.excerpt)}"</p>
                       )}
-                      {includeExamples && allowRedactedExcerpts && hole.evidence.length > 0 && (
+                      {includeExamples &&
+                        hole.evidence.sessionIds.length > 0 &&
+                        !(allowRedactedExcerpts && hole.evidence.pointers.length > 0) && (
+                          <p className="muted mt-2 text-xs text-slate-200">
+                            Evidence: {hole.evidence.sessionIds.length.toLocaleString()} sessions
+                          </p>
+                        )}
+                      {includeExamples && allowRedactedExcerpts && hole.evidence.pointers.length > 0 && (
                         <details className="mt-3 rounded-xl border border-white/10 bg-white/5 p-3">
                           <summary className="cursor-pointer text-xs font-semibold text-slate-200">
                             Evidence (private)
                           </summary>
                           <ul className="mt-2 space-y-1 text-xs text-slate-200">
-                            {hole.evidence.slice(0, 3).map((e, idx) => (
+                            {hole.evidence.pointers.slice(0, 3).map((e, idx) => (
                               <li key={`${hole.key}-ev-${idx}`}>
                                 {(e.startDay ?? e.endDay ?? "date")} · {formatExcerpt(e.snippets[0] ?? "signal")}
                               </li>
